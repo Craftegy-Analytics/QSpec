@@ -1,0 +1,29 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": {
+    "name": "products-page-two",
+    "title": "Products, Page Two",
+    "description": "Slices the row set to one page with the limit transform's count and offset"
+  },
+  "spec": {
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT product, revenue FROM product_revenue ORDER BY revenue DESC"
+    },
+    "dataset": {
+      "fields": {
+        "product": { "type": "string", "nullable": false },
+        "revenue": { "type": "number", "nullable": false, "semanticType": "currency" }
+      }
+    },
+    "transforms": [
+      {
+        "type": "limit",
+        "count": 10,
+        "offset": 10
+      }
+    ]
+  }
+}

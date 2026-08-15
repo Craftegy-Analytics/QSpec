@@ -1,0 +1,30 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": {
+    "name": "product-catalog-summary",
+    "title": "Product Catalog Summary",
+    "description": "Drops an internal-only column by projecting the dataset down to a named field subset with select"
+  },
+  "spec": {
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT id, name, price, internal_notes FROM products"
+    },
+    "dataset": {
+      "fields": {
+        "id": { "type": "string", "nullable": false },
+        "name": { "type": "string", "nullable": false },
+        "price": { "type": "number", "nullable": false, "semanticType": "currency" },
+        "internal_notes": { "type": "string", "nullable": true }
+      }
+    },
+    "transforms": [
+      {
+        "type": "select",
+        "fields": ["id", "name", "price"]
+      }
+    ]
+  }
+}

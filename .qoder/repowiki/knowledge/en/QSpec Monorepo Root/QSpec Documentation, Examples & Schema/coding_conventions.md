@@ -1,0 +1,6 @@
+- Each example manifest is named with a two-digit sequential prefix followed by a descriptive name (e.g. `04-transform-filter.qspec.json`) so they can be globbed and ordered predictably.
+- Manifests are self-contained and do not reference external data sources; plugin-aware validation uses a stub execute path, so no real adapters or credentials appear in any example.
+- Parameter bindings use the `$parameters.<name>` string pattern (or an equivalent `{ parameter }` object) rather than embedding literal values directly in query statements.
+- Transforms declare their output field types explicitly via `fieldType` instead of relying on type inference, ensuring downstream consumers see stable schemas.
+- Fixtures are split into `valid/` and `invalid/` subdirectories, with filenames describing the specific constraint being tested (e.g. `missing-name.qspec.json`, `unsupported-version.qspec.json`).
+- Documentation files follow a flat, topic-per-file layout under `docs/` with one markdown file per concept (CLI, parameters, transforms, presentations, security, etc.), and forward-looking plans/specks are segregated under `docs/superpowers/`.

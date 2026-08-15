@@ -1,0 +1,1 @@
+Pure Node.js ESM modules using built-in `node:fs`, `node:path`, `node:child_process`, and `node:url`; no third-party dependencies. Relies on npm workspace commands (`-w`) and npm provenance attestation support.

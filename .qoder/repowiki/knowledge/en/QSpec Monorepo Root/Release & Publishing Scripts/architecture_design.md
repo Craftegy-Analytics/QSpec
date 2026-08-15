@@ -1,0 +1,6 @@
+Three independent ESM Node scripts under `scripts/` form the release toolchain:
+
+- `release-check.mjs` is the central validator: it scans `packages/`, enforces lockstep versions, validates per-package `package.json` fields (`license`, `files`, `publishConfig.access`, `exports`, `repository`), verifies inter-package dependencies pin exact versions against the release version, computes a deterministic topological publish order via a DFS visitor, and emits either human-readable output or a machine-readable `{ ok, version, packages, problems }` JSON object (controlled by `--json`).
+- `publish-packages.mjs` consumes that JSON plan, runs `npm pack --dry-run` to assert each tarball contains only `dist/` plus allowed root files and includes `dist/index.js`, skips versions already on the registry via `npm view`, then publishes each package in the computed order with `--access public` (optionally `--provenance` for CI).
+- `copy-schemas.mjs` is a small utility that recursively copies `schemas/` into `packages/schema/src/schemas` at build time.
+  Dependency direction is one-way: `publish-packages.mjs` depends on `release-check.mjs`; neither script imports the other directly — they communicate through npm subcommands and stdout/stdin. All scripts resolve `REPO_ROOT` relative to `import.meta.url` so they work from any working directory.

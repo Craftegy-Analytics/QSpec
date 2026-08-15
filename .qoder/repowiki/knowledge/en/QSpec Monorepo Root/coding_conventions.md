@@ -1,0 +1,4 @@
+- All packages extend the root `tsconfig.base.json`, inherventing strict mode, NodeNext module resolution, declaration generation, and composite builds.
+- Tests live alongside sources under `packages/*/src/**/*.test.(ts|tsx)` or in a sibling `test/` directory and are auto-discovered by the root Vitest config.
+- JSX in `.tsx` files uses the automatic runtime (no explicit `React` import), matching the root Vitest esbuild `jsx: 'automatic'` setting.
+- Cross-package workflows are driven by npm scripts at the workspace root rather than per-package tooling, keeping build/test/release entry points centralized.

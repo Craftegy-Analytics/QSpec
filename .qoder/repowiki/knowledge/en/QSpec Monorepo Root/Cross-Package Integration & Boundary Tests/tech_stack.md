@@ -1,0 +1,1 @@
+Vitest as the test runner; @testing-library/react with jsdom for React rendering; testcontainers (`@testcontainers/postgresql`, `PostgreSqlContainer`) for ephemeral PostgreSQL instances; pg client for fixture setup; Node `child_process.execFile` for black-box CLI invocation.

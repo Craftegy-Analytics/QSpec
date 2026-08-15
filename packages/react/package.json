@@ -1,0 +1,49 @@
+{
+  "name": "@qspecs/react",
+  "version": "0.1.0",
+  "description": "React bindings for QSpec: a Suspense-safe query cache, provider, and hooks",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Craftegy-Analytics/QSpec.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/Craftegy-Analytics/QSpec/tree/main/packages/react#readme",
+  "bugs": {
+    "url": "https://github.com/Craftegy-Analytics/QSpec/issues"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.19"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@qspecs/core": "0.1.0",
+    "react": ">=19"
+  },
+  "devDependencies": {
+    "@qspecs/core": "0.1.0",
+    "@qspecs/testing": "0.1.0",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  }
+}

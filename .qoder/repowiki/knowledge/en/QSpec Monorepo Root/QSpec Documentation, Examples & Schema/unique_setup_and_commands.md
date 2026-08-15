@@ -1,0 +1,1 @@
+Example manifests are kept in sync with the CLI via `qspec validate --config examples/qspec.config.js examples/*.qspec.json`, which loads the three plugins and validates each manifest against a stub data source (no database driver or credentials needed). Invalid fixtures under `fixtures/invalid/` serve as negative-test inputs for schema/rule checks.

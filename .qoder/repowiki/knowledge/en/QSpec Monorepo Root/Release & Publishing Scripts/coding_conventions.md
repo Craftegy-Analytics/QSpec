@@ -1,0 +1,5 @@
+- Scripts locate the repository root by resolving `path.dirname(fileURLToPath(import.meta.url))` and walking up to `..`, rather than relying on CWD.
+- External commands are invoked via `execFileSync` with `cwd: REPO_ROOT` and `encoding: 'utf8'`, capturing stdout when parsing structured output (e.g., `npm pack --dry-run --json`, `release-check.mjs --json`).
+- CLI flags are parsed by scanning `process.argv.slice(2)` for named switches like `--dry-run`, `--json`, `--require-dist`, `--expect-version`, and `--provenance`.
+- Validation failures accumulate into a `problems` array via a shared `fail(message)` helper instead of throwing immediately, allowing the script to report all issues before exiting non-zero.
+- Per-package validation iterates over entries discovered by reading `packages/*/package.json`, treating the filesystem as the source of truth for which packages exist.

@@ -1,0 +1,30 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": {
+    "name": "high-value-orders",
+    "title": "High-Value Orders",
+    "description": "Orders whose amount clears a threshold, using the filter transform's comparison shorthand"
+  },
+  "spec": {
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT id, region, amount, status FROM orders"
+    },
+    "dataset": {
+      "fields": {
+        "id": { "type": "string", "nullable": false },
+        "region": { "type": "string", "nullable": false },
+        "amount": { "type": "number", "nullable": false, "semanticType": "currency" },
+        "status": { "type": "string", "nullable": false }
+      }
+    },
+    "transforms": [
+      {
+        "type": "filter",
+        "where": { "field": "amount", "operator": "gt", "value": 100 }
+      }
+    ]
+  }
+}

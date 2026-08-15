@@ -1,0 +1,48 @@
+{
+  "name": "@qspecs/cli",
+  "version": "0.1.0",
+  "description": "Command-line tooling for QSpec manifests",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Craftegy-Analytics/QSpec.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/Craftegy-Analytics/QSpec/tree/main/packages/cli#readme",
+  "bugs": {
+    "url": "https://github.com/Craftegy-Analytics/QSpec/issues"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.19"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "qspec": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@qspecs/core": "0.1.0",
+    "@qspecs/schema": "0.1.0"
+  },
+  "devDependencies": {
+    "@qspecs/charts": "0.1.0",
+    "@qspecs/sql": "0.1.0",
+    "@qspecs/transforms": "0.1.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://qspec.dev/schemas/v1/chart.json",
+
+  "apiVersion": "qspec.dev/v1",
+
+  "kind": "Chart",
+
+  "metadata": {
+    "name": "revenue-by-region",
+    "title": "Revenue by Region",
+    "description": "Monthly revenue, one series per region",
+    "tags": ["finance", "sales"]
+  },
+
+  "spec": {
+    "parameters": {
+      "from": {
+        "type": "date",
+        "required": true
+      },
+
+      "to": {
+        "type": "date",
+        "required": true
+      }
+    },
+
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+
+      "statement": "SELECT date_trunc('month', created_at) AS month, region, SUM(amount) AS revenue FROM orders WHERE created_at >= :from AND created_at < :to GROUP BY month, region ORDER BY month",
+
+      "bindings": {
+        "from": "$parameters.from",
+        "to": "$parameters.to"
+      }
+    },
+
+    "dataset": {
+      "fields": {
+        "month": {
+          "type": "datetime",
+          "nullable": false
+        },
+
+        "region": {
+          "type": "string",
+          "nullable": false
+        },
+
+        "revenue": {
+          "type": "number",
+          "nullable": false,
+          "semanticType": "currency",
+
+          "format": {
+            "currency": "USD"
+          }
+        }
+      }
+    },
+
+    "presentation": {
+      "type": "line",
+
+      "x": {
+        "field": "month",
+        "label": "Month"
+      },
+
+      "series": {
+        "field": "revenue",
+        "groupBy": "region",
+        "label": "Revenue"
+      },
+
+      "legend": {
+        "visible": true
+      },
+
+      "tooltip": {
+        "visible": true
+      }
+    }
+  }
+}

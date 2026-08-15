@@ -1,0 +1,1 @@
+Node.js scripts that validate the monorepo is in a releasable state, copy JSON schemas into the schema package, and publish all publishable packages in dependency order with pre-flight tarball checks.

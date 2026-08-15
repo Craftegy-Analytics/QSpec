@@ -1,0 +1,29 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": {
+    "name": "products-by-revenue",
+    "title": "Products by Revenue",
+    "description": "Orders rows by a field in descending order with the sort transform"
+  },
+  "spec": {
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT product, revenue FROM product_revenue"
+    },
+    "dataset": {
+      "fields": {
+        "product": { "type": "string", "nullable": false },
+        "revenue": { "type": "number", "nullable": false, "semanticType": "currency" }
+      }
+    },
+    "transforms": [
+      {
+        "type": "sort",
+        "field": "revenue",
+        "direction": "desc"
+      }
+    ]
+  }
+}

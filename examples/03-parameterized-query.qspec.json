@@ -1,0 +1,54 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": {
+    "name": "orders-by-period",
+    "title": "Orders by Period",
+    "description": "Orders within a caller-supplied date range, optionally filtered to one region"
+  },
+  "spec": {
+    "parameters": {
+      "from": {
+        "type": "date",
+        "required": true
+      },
+      "to": {
+        "type": "date",
+        "required": true
+      },
+      "region": {
+        "type": "string",
+        "required": false,
+        "default": "US"
+      },
+      "limit": {
+        "type": "integer",
+        "required": false,
+        "default": 100,
+        "validation": {
+          "min": 1,
+          "max": 1000
+        }
+      }
+    },
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT id, region, amount, created_at FROM orders WHERE created_at >= :from AND created_at < :to AND region = :region LIMIT :limit",
+      "bindings": {
+        "from": "$parameters.from",
+        "to": "$parameters.to",
+        "region": "$parameters.region",
+        "limit": "$parameters.limit"
+      }
+    },
+    "dataset": {
+      "fields": {
+        "id": { "type": "string", "nullable": false },
+        "region": { "type": "string", "nullable": false },
+        "amount": { "type": "number", "nullable": false, "semanticType": "currency" },
+        "created_at": { "type": "datetime", "nullable": false }
+      }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+`node scripts/release-check.mjs [--expect-version X] [--require-dist] [--json]` validates the repo; `node scripts/publish-packages.mjs [--dry-run] [--provenance]` performs the actual publish. The `--provenance` flag is intended for CI where `GITHUB_REPOSITORY` is set, since provenance verification matches that env var against `package.json.repository.url`.

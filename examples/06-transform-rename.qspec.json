@@ -1,0 +1,33 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": {
+    "name": "customer-directory",
+    "title": "Customer Directory",
+    "description": "Renames the query's raw snake_case columns to the field names the rest of the pipeline uses"
+  },
+  "spec": {
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT usr_id, usr_name, usr_email FROM users"
+    },
+    "dataset": {
+      "fields": {
+        "usr_id": { "type": "string", "nullable": false },
+        "usr_name": { "type": "string", "nullable": false },
+        "usr_email": { "type": "string", "nullable": false }
+      }
+    },
+    "transforms": [
+      {
+        "type": "rename",
+        "fields": {
+          "usr_id": "id",
+          "usr_name": "name",
+          "usr_email": "email"
+        }
+      }
+    ]
+  }
+}

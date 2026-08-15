@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.DS_Store
+packages/schema/src/schemas/
+
+# Subagent-driven-development scratch workspace.
+.superpowers/

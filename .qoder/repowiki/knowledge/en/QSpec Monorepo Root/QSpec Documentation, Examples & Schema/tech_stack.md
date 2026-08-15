@@ -1,0 +1,1 @@
+JSON-Schema draft 2020-12 (`$schema: https://json-schema.org/draft/2020-12/schema`) defining the QSpec v1 resource contract; example manifests are validated by the QSpec CLI in plugin-aware mode using `@qspecs/sql`, `@qspecs/transforms`, and `@qspecs/charts` plugins.

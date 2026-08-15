@@ -1,0 +1,1 @@
+Node.js ≥22.19 with npm workspaces; TypeScript 5.8 with strict composite builds; Vitest 3 as the unified test runner across packages; Prettier 3 for formatting; Testcontainers + PostgreSQL driver for integration tests against real databases.

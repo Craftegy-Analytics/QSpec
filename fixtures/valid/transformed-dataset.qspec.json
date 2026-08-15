@@ -1,0 +1,27 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": { "name": "top-products", "title": "Top Products", "tags": ["sales"] },
+  "spec": {
+    "parameters": {
+      "limit": { "type": "integer", "default": 10, "validation": { "min": 1, "max": 100 } },
+      "period": { "type": "enum", "default": "30d", "values": ["7d", "30d", "90d"] }
+    },
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT product, SUM(amount) AS revenue FROM orders GROUP BY product",
+      "bindings": { "period": "$parameters.period" }
+    },
+    "dataset": {
+      "fields": {
+        "product": { "type": "string", "nullable": false },
+        "revenue": { "type": "number", "nullable": false, "semanticType": "currency" }
+      }
+    },
+    "transforms": [
+      { "type": "sort", "field": "revenue", "direction": "desc" },
+      { "type": "limit", "count": 10 }
+    ]
+  }
+}

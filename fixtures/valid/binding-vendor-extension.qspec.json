@@ -1,0 +1,16 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": { "name": "binding-vendor-extension" },
+  "spec": {
+    "parameters": {
+      "x": { "type": "string" }
+    },
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT 1",
+      "bindings": { "a": { "parameter": "x", "x-vendor": { "hint": "cache" } } }
+    }
+  }
+}

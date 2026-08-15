@@ -1,0 +1,12 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": { "name": "dataset-field-nullable-non-bool" },
+  "spec": {
+    "dataset": {
+      "fields": {
+        "a": { "type": "string", "nullable": "yes" }
+      }
+    }
+  }
+}

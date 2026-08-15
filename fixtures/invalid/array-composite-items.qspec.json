@@ -1,0 +1,10 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": { "name": "array-composite-items" },
+  "spec": {
+    "parameters": {
+      "tags": { "type": "array", "items": { "type": "enum" } }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: main
+nodes_managed: true
+exported_at: "2026-08-15T11:15:05Z"
+modules:
+  "":
+    dir_name: QSpec Monorepo Root
+    title: QSpec Monorepo Root
+    scope:
+      - README.md
+      - RELEASING.md
+      - SPEC.md
+      - .gitignore
+      - .prettierignore
+      - .prettierrc.json
+      - package.json
+      - package-lock.json
+      - tsconfig.base.json
+      - tsconfig.json
+      - tsconfig.test.json
+      - vitest.config.ts
+      - LICENSE
+    source_files: []
+    children:
+      - docs_and_examples
+      - scripts_and_ci
+      - tests
+    depends_on: []
+    related_to: []
+  docs_and_examples:
+    dir_name: QSpec Documentation, Examples & Schema
+    title: QSpec Documentation, Examples & Schema
+    scope:
+      - docs/
+      - examples/
+      - fixtures/
+      - schemas/
+    source_files: []
+    children: []
+    depends_on: []
+    related_to:
+      - path: scripts_and_ci
+      - path: tests
+  scripts_and_ci:
+    dir_name: Release & Publishing Scripts
+    title: Release & Publishing Scripts
+    scope:
+      - scripts/
+    source_files: []
+    children: []
+    depends_on: []
+    related_to:
+      - path: docs_and_examples
+  tests:
+    dir_name: Cross-Package Integration & Boundary Tests
+    title: Cross-Package Integration & Boundary Tests
+    scope:
+      - test/
+    source_files: []
+    children: []
+    depends_on: []
+    related_to:
+      - path: docs_and_examples

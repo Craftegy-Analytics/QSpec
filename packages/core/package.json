@@ -1,0 +1,36 @@
+{
+  "name": "@qspecs/core",
+  "version": "0.1.0",
+  "description": "Core runtime and manifest model for QSpec",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Craftegy-Analytics/QSpec.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/Craftegy-Analytics/QSpec/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/Craftegy-Analytics/QSpec/issues"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.19"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  }
+}

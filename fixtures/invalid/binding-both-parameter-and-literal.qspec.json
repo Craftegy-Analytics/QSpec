@@ -1,0 +1,13 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": { "name": "binding-both-parameter-and-literal" },
+  "spec": {
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT 1",
+      "bindings": { "a": { "parameter": "x", "literal": 1 } }
+    }
+  }
+}

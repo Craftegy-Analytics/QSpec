@@ -1,0 +1,6 @@
+- Container-dependent suites use a shared `containerRuntimeUnavailableReason()` helper and conditionally switch between `describe` and `describe.skip`, annotating skipped suites with an `UNVERIFIED` list of what goes untested.
+- End-to-end manifests are defined as JSON strings passed to `prepare()` so that schema validation and text-path parsing are exercised rather than bypassed by object literals.
+- Fixture data includes sentinel rows outside the queried parameter range (e.g., row 1 before `from`, row 8 after `to`) to make binding correctness falsifiable instead of merely non-erroring.
+- Security assertions on the HTTP boundary record raw request/response bodies via a wrapper around `fetch` and assert that secrets (passwords, usernames, SQL statements, connection URIs) do not appear in the request body, response body, or rendered DOM.
+- React tests wrap every `render`/`rerender` call in `act(async () => ...)` helpers (`renderSuspended`, `rerenderSuspended`) because components suspend immediately while awaiting the query, and clean up with `afterEach(cleanup)` plus a `console.error` spy asserted empty in `afterEach`.
+- Package-boundary tests iterate over packages via a shared `forEachNamedPackage` helper that tracks which names were matched and asserts the full expected set was exercised, preventing silent drops from typos or renames.

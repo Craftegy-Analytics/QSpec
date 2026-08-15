@@ -1,0 +1,20 @@
+schema_version: 1
+module_path: ""
+title: QSpec Monorepo Root
+scope:
+  - README.md
+  - RELEASING.md
+  - SPEC.md
+  - .gitignore
+  - .prettierignore
+  - .prettierrc.json
+  - package.json
+  - package-lock.json
+  - tsconfig.base.json
+  - tsconfig.json
+  - tsconfig.test.json
+  - vitest.config.ts
+  - LICENSE
+source_files: []
+depends_on: []
+related_to: []

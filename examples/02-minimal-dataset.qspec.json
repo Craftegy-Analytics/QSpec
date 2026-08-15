@@ -1,0 +1,8 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": {
+    "name": "minimal"
+  },
+  "spec": {}
+}

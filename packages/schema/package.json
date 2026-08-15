@@ -1,0 +1,42 @@
+{
+  "name": "@qspecs/schema",
+  "version": "0.1.0",
+  "description": "Official JSON Schema documents for the QSpec specification",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Craftegy-Analytics/QSpec.git",
+    "directory": "packages/schema"
+  },
+  "homepage": "https://github.com/Craftegy-Analytics/QSpec/tree/main/packages/schema#readme",
+  "bugs": {
+    "url": "https://github.com/Craftegy-Analytics/QSpec/issues"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.19"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1"
+  },
+  "devDependencies": {
+    "@qspecs/core": "0.1.0"
+  },
+  "scripts": {
+    "build": "node ../../scripts/copy-schemas.mjs && tsc -p tsconfig.build.json"
+  }
+}

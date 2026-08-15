@@ -1,0 +1,1 @@
+`npm run build` triggers `prebuild` → copies JSON schemas via `scripts/copy-schemas.mjs` then `tsc --build` across all workspaces; `npm test` runs Vitest over both package-internal and top-level `test/` suites; `npm run release:dry-run` performs the full preflight check and dry-run publish orchestrated by `scripts/release-check.mjs` and `scripts/publish-packages.mjs`.

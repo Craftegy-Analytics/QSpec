@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run build
+      - run: npm run typecheck:tests
+      - name: Run the full test suite
+        # A `run:` step with no `shell:` key runs as `bash -e {0}` on Linux
+        # runners: `-e` only, no `-o pipefail`. In a `cmd | tee file` pipeline
+        # that means the step's exit status is `tee`'s (almost always 0), not
+        # vitest's — a failing test anywhere in the suite would leave this step,
+        # and therefore the job, green. Only an explicit `shell: bash` gets
+        # GitHub Actions' documented `bash --noprofile --norc -eo pipefail
+        # {0}`, which does set pipefail. (`run: |` plus a literal
+        # `set -euo pipefail` would work too; this is the smaller diff and
+        # keeps the default-shell footgun visible at the call site instead of
+        # relying on every future edit here to remember to add the `set` line.)
+        shell: bash
+        run: npm test -- --reporter=verbose --reporter=json --outputFile=/tmp/full-suite.json 2>&1 | tee /tmp/full-suite.log
+      - name: Verify the PostgreSQL integration and end-to-end suites actually ran
+        # GitHub-hosted ubuntu-latest runners ship Docker already running, which is all
+        # testcontainers needs (packages/postgres/test/integration.test.ts,
+        # test/postgres-pipeline.test.ts, and test/react-pipeline.test.tsx each start their own
+        # postgres:16-alpine container; no `services:` block is needed alongside that). The third
+        # of those, test/react-pipeline.test.tsx, ALSO needs jsdom — declared per-file via a
+        # `// @vitest-environment jsdom` docblock rather than a vitest.config.ts setting — which
+        # is a second, independent way for it to end up silently not covering what it claims: a
+        # dropped docblock wouldn't skip the file, it would just make every React render inside
+        # it throw for lack of a DOM, which the checks below catch the same way they catch a
+        # dropped container (a non-zero `failing` count for that file). All three suites detect a
+        # missing container runtime and skip themselves rather than failing outright — the right
+        # behavior for a contributor's machine without Docker, but the wrong one here: a CI skip
+        # and a CI pass look identical in the vitest summary.
+        #
+        # A single negative grep for "SKIPPED, no container runtime" only catches one failure
+        # mode (Docker present but undetected). It would find nothing — and CI would go green
+        # with zero real-database (and, for the third suite, zero real-browser-loop) coverage —
+        # if a suite were instead dropped from the vitest glob, its file renamed, or its warn
+        # string edited. So this step asserts three things positively: each suite's real
+        # (non-skipped) name appears in the output, every test that ran under each suite passed
+        # with none skipped, and the "SKIPPED" line is still absent.
+        #
+        # It reads the artifacts the "Run the full test suite" step above already produced
+        # (both the verbose-reporter log at /tmp/full-suite.log and the JSON reporter at
+        # /tmp/full-suite.json) instead of re-running these files a second time — that
+        # used to spin up more postgres:16-alpine containers per job, on top of the ones
+        # the main run already started, times three Node versions in the matrix.
+        #
+        # The describe-name presence checks stay on the verbose log — they cover the
+        # file-dropped/renamed/de-globbed cases and don't need structured data. The pass/fail/
+        # skip counts move to the JSON reporter's `testResults[].assertionResults[].status`,
+        # asserted per file as passing > 0, failing == 0, and pending (vitest's status for
+        # both `it.skip` and a runtime `ctx.skip()`) == 0. This is deliberately not an exact
+        # total: an exact-equality bound (the previous version asserted precisely 21) catches
+        # a silently dropped test but also breaks on every legitimate test addition to either
+        # file, which trains reviewers to treat a changed count as routine bookkeeping instead
+        # of investigating it. A "some tests passed, none failed, none skipped" structural
+        # check catches the actual blind spot — a dynamically-skipped test hiding inside an
+        # otherwise-green file — without being sensitive to the total ever changing.
+        #
+        # (vitest's JSON reporter has no per-file numPendingTests/numFailingTests/
+        # numPassingTests — those three fields exist only once, aggregated over the entire
+        # run, in the top-level report object. Each `testResults[]` entry's own `status` field
+        # is file-level pass/fail and is NOT sensitive to skips: a file with two skipped tests
+        # and zero failures reports `status: "passed"`. The per-test granularity that does
+        # exist is `assertionResults[].status`, one of "passed" | "failed" | "skipped" |
+        # "todo" | "pending" — so the per-file counts below are computed by filtering that
+        # array, not read off a ready-made field.)
+        run: |
+          set -euo pipefail
+          LOG=/tmp/full-suite.log
+          JSON=/tmp/full-suite.json
+
+          [ -s "$JSON" ] || { echo "::error::$JSON is missing or empty" >&2; exit 1; }
+
+          if grep -q "SKIPPED, no container runtime" "$LOG"; then
+            echo "::error::A PostgreSQL integration or end-to-end suite was skipped (no container runtime found). CI must run these against a real PostgreSQL." >&2
+            exit 1
+          fi
+
+          if ! grep -qF "@qspecs/postgres against a real PostgreSQL (testcontainers)" "$LOG"; then
+            echo "::error::packages/postgres/test/integration.test.ts did not report as having run — file missing, renamed, dropped from the vitest glob, or its describe name changed?" >&2
+            exit 1
+          fi
+          if ! grep -qF "SPEC.md §116 end-to-end pipeline (testcontainers PostgreSQL)" "$LOG"; then
+            echo "::error::test/postgres-pipeline.test.ts did not report as having run — file missing, renamed, dropped from the vitest glob, or its describe name changed?" >&2
+            exit 1
+          fi
+          if ! grep -qF "the full browser loop (testcontainers PostgreSQL -> HTTP -> React -> Recharts)" "$LOG"; then
+            echo "::error::test/react-pipeline.test.tsx did not report as having run — file missing, renamed, dropped from the vitest glob (note: it is a .tsx file matched by the test/**/*.test.tsx glob entry, not test/**/*.test.ts), or its describe name changed?" >&2
+            exit 1
+          fi
+
+          check_file() {
+            local suffix="$1"
+            local matches
+            matches=$(jq --arg suffix "$suffix" '[.testResults[] | select(.name | endswith($suffix))] | length' "$JSON")
+            if [ "$matches" -ne 1 ]; then
+              echo "::error::Expected exactly one JSON test-result entry ending in '${suffix}', found ${matches}." >&2
+              exit 1
+            fi
+
+            local counts passing failing pending
+            counts=$(jq -r --arg suffix "$suffix" '
+              (.testResults[] | select(.name | endswith($suffix)) | .assertionResults) as $a
+              | ([$a[] | select(.status == "passed")] | length),
+                ([$a[] | select(.status == "failed")] | length),
+                ([$a[] | select(.status != "passed" and .status != "failed")] | length)
+            ' "$JSON")
+            passing=$(sed -n 1p <<<"$counts")
+            failing=$(sed -n 2p <<<"$counts")
+            pending=$(sed -n 3p <<<"$counts")
+
+            if [ "$failing" -ne 0 ] || [ "$pending" -ne 0 ] || [ "$passing" -eq 0 ]; then
+              echo "::error::${suffix}: expected passing>0, failing=0, pending=0 (covers both static it.skip and a dynamic ctx.skip()); found passing=${passing} failing=${failing} pending=${pending}." >&2
+              exit 1
+            fi
+            echo "${suffix}: passing=${passing} failing=0 pending=0"
+          }
+
+          check_file "packages/postgres/test/integration.test.ts"
+          check_file "test/postgres-pipeline.test.ts"
+          check_file "test/react-pipeline.test.tsx"
+      - name: Verify each package packs cleanly
+        run: |
+          set -euo pipefail
+          for directory in packages/*/; do
+            name=$(node -p "require('./${directory}package.json').name")
+            private=$(node -p "require('./${directory}package.json').private === true")
+            if [ "$private" = "true" ]; then continue; fi
+            npm pack --dry-run --workspace "$name" > /dev/null
+          done
+      - name: Validate every fixture with the CLI
+        run: node packages/cli/dist/bin.js validate fixtures/valid/*.qspec.json
+      - name: Validate every example with the CLI, plugin-aware
+        # Structural validation alone (the step above) cannot see an unknown
+        # transform operator, an expression nested past maxExpressionDepth, a
+        # typo'd SQL binding, or a chart series naming a field a transform
+        # projected away — that validation lives in each plugin's own
+        # validate() hook, which only runs when prepare() does. `--config`
+        # loads sql(), transforms(), and charts() (examples/qspec.config.js)
+        # and runs every manifest under examples/ through prepare() against
+        # them, so an example that drifts from the schema or uses an operator
+        # that no longer exists fails the build instead of rotting silently.
+        run: node packages/cli/dist/bin.js validate --config examples/qspec.config.js examples/*.qspec.json
