@@ -1,0 +1,14 @@
+# The source specification is an input document, not ours to reformat.
+SPEC.md
+
+# Design docs and implementation plans embed illustrative code in fences.
+# Prettier reformats fenced code by default, which rewrites the plans that
+# task briefs are extracted from. Keep them byte-stable.
+docs/superpowers/
+
+# Build artifacts and generated schema copies.
+dist/
+packages/schema/src/schemas/
+
+# SDD scratch workspace (git-ignored).
+.superpowers/

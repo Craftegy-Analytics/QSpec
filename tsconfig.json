@@ -1,0 +1,16 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core/tsconfig.build.json" },
+    { "path": "./packages/schema/tsconfig.build.json" },
+    { "path": "./packages/cli/tsconfig.build.json" },
+    { "path": "./packages/testing/tsconfig.build.json" },
+    { "path": "./packages/transforms/tsconfig.build.json" },
+    { "path": "./packages/charts/tsconfig.build.json" },
+    { "path": "./packages/sql/tsconfig.build.json" },
+    { "path": "./packages/postgres/tsconfig.build.json" },
+    { "path": "./packages/http/tsconfig.build.json" },
+    { "path": "./packages/react/tsconfig.build.json" },
+    { "path": "./packages/recharts/tsconfig.build.json" }
+  ]
+}

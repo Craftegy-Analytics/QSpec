@@ -1,0 +1,89 @@
+{
+  "$schema": "https://qspec.dev/schemas/v1/chart.json",
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Chart",
+  "metadata": {
+    "name": "monthly-revenue",
+    "title": "Monthly Revenue",
+    "description": "Revenue grouped by month",
+    "tags": ["finance", "sales"]
+  },
+  "spec": {
+    "parameters": {
+      "from": {
+        "type": "date",
+        "required": true
+      },
+      "to": {
+        "type": "date",
+        "required": true
+      },
+      "country": {
+        "type": "string",
+        "required": false,
+        "default": "US"
+      }
+    },
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT date_trunc('month', created_at) AS month, SUM(amount) AS revenue FROM orders WHERE created_at >= :from AND created_at < :to AND country = :country GROUP BY month ORDER BY month",
+      "bindings": {
+        "from": "$parameters.from",
+        "to": "$parameters.to",
+        "country": "$parameters.country"
+      }
+    },
+    "dataset": {
+      "fields": {
+        "month": {
+          "type": "datetime",
+          "nullable": false
+        },
+        "revenue": {
+          "type": "number",
+          "nullable": false,
+          "semanticType": "currency",
+          "format": {
+            "currency": "USD"
+          }
+        }
+      }
+    },
+    "transforms": [
+      {
+        "type": "filter",
+        "where": {
+          "operator": "gt",
+          "arguments": [
+            {
+              "field": "revenue"
+            },
+            {
+              "literal": 0
+            }
+          ]
+        }
+      }
+    ],
+    "presentation": {
+      "type": "line",
+      "x": {
+        "field": "month",
+        "label": "Month"
+      },
+      "series": [
+        {
+          "field": "revenue",
+          "label": "Revenue"
+        }
+      ],
+      "legend": {
+        "visible": false
+      },
+      "tooltip": {
+        "visible": true
+      }
+    }
+  }
+}

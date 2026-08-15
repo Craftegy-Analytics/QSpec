@@ -1,0 +1,34 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": {
+    "name": "order-line-totals",
+    "title": "Order Line Totals",
+    "description": "Computes a new field, totalPrice, from two existing ones with the derive transform"
+  },
+  "spec": {
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT id, quantity, unit_price FROM order_lines"
+    },
+    "dataset": {
+      "fields": {
+        "id": { "type": "string", "nullable": false },
+        "quantity": { "type": "number", "nullable": false },
+        "unit_price": { "type": "number", "nullable": false, "semanticType": "currency" }
+      }
+    },
+    "transforms": [
+      {
+        "type": "derive",
+        "field": "totalPrice",
+        "fieldType": "number",
+        "expression": {
+          "operator": "multiply",
+          "arguments": [{ "field": "quantity" }, { "field": "unit_price" }]
+        }
+      }
+    ]
+  }
+}

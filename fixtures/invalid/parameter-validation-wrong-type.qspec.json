@@ -1,0 +1,10 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": { "name": "parameter-validation-wrong-type" },
+  "spec": {
+    "parameters": {
+      "limit": { "type": "integer", "validation": { "min": "0" } }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "name": "@qspecs/postgres",
+  "version": "0.1.0",
+  "description": "PostgreSQL data source for QSpec: pooling, execution, server-side cancellation, and result normalization",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Craftegy-Analytics/QSpec.git",
+    "directory": "packages/postgres"
+  },
+  "homepage": "https://github.com/Craftegy-Analytics/QSpec/tree/main/packages/postgres#readme",
+  "bugs": {
+    "url": "https://github.com/Craftegy-Analytics/QSpec/issues"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.19"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@qspecs/core": "0.1.0",
+    "@qspecs/sql": "0.1.0"
+  },
+  "dependencies": {
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@qspecs/core": "0.1.0",
+    "@qspecs/sql": "0.1.0",
+    "@qspecs/testing": "0.1.0",
+    "@testcontainers/postgresql": "^12.1.0",
+    "@types/pg": "^8.21.0",
+    "testcontainers": "^12.1.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  }
+}

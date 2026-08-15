@@ -1,0 +1,10 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": { "name": "array-without-items" },
+  "spec": {
+    "parameters": {
+      "tags": { "type": "array" }
+    }
+  }
+}

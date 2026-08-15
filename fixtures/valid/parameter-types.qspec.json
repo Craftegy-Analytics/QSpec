@@ -1,0 +1,17 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": { "name": "parameter-types" },
+  "spec": {
+    "parameters": {
+      "aString": { "type": "string" },
+      "aNumber": { "type": "number" },
+      "anInteger": { "type": "integer" },
+      "aBoolean": { "type": "boolean" },
+      "aDate": { "type": "date" },
+      "aDatetime": { "type": "datetime" },
+      "aPeriod": { "type": "enum", "values": ["7d", "30d", "90d"] },
+      "aList": { "type": "array", "items": { "type": "string" } }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Dataset",
+  "metadata": { "name": "enum-without-values" },
+  "spec": {
+    "parameters": {
+      "period": { "type": "enum" }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "apiVersion": "qspec.dev/v1",
+  "kind": "Chart",
+  "metadata": {
+    "name": "revenue-by-category",
+    "title": "Revenue Share by Category",
+    "description": "One slice per category, sized by revenue, using the pie presentation's category/value shape instead of an x axis and series list",
+    "tags": ["finance", "sales"]
+  },
+  "spec": {
+    "query": {
+      "source": "analytics",
+      "language": "sql",
+      "statement": "SELECT category, SUM(amount) AS revenue FROM orders GROUP BY category"
+    },
+    "dataset": {
+      "fields": {
+        "category": { "type": "string", "nullable": false },
+        "revenue": { "type": "number", "nullable": false, "semanticType": "currency" }
+      }
+    },
+    "presentation": {
+      "type": "pie",
+      "category": { "field": "category", "label": "Category" },
+      "value": { "field": "revenue", "label": "Revenue" },
+      "legend": { "visible": true },
+      "tooltip": { "visible": true }
+    }
+  }
+}
