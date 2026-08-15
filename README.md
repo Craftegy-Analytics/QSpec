@@ -1,5 +1,4 @@
 # QSpec
-[![CI](https://github.com/Craftegy-Analytics/QSpec/actions/workflows/ci.yml/badge.svg)](https://github.com/Craftegy-Analytics/QSpec/actions/workflows/ci.yml)
 
 QSpec is an extensible declarative specification and runtime for defining parameterized data
 queries, validating their inputs and outputs, transforming returned datasets, and describing
