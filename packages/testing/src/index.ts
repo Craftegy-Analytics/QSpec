@@ -14,3 +14,8 @@ export {
   runDataSourceContractTests,
   type DataSourceContractFixture,
 } from "./contracts/data-source.js";
+export {
+  runExecutionPolicyContractTests,
+  type ExecutionPolicyCase,
+  type ExecutionPolicyContractFixture,
+} from "./contracts/execution-policy.js";

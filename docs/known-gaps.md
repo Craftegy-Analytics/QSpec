@@ -36,6 +36,17 @@ caller holding a parsed object has already paid it. Enforcing it honestly would 
 `JSON.stringify` on every `prepare()`. `maxTransforms`, `maxRows`, and `maxExpressionDepth`
 cover post-parse work on both paths.
 
+### `ExecutionContext.metadata` must be a plain object (behaviour change in 0.2.0)
+
+0.1.0 accepted any `metadata` value and ignored it. From 0.2.0 core forwards it to execution
+policies and `DataSourceContext.metadata`, so it must be `undefined` or a plain object
+(`isPlainObject`); anything else, including a class instance, a `Map`, an array or `null`, rejects
+the execution with `ExecutionContextError` (`QSPEC_EXECUTION_CONTEXT_INVALID`, path `["metadata"]`)
+before parameters are validated. The fix is to wrap the value: `metadata: { scope: instance }`.
+Silently ignoring a value the caller meant to pass is the failure this rejects. Because
+`isPlainObject` fails closed on a plain object from another realm (see "Accepted permanently"
+below), a `metadata` object built in a different `vm` context or iframe is rejected the same way.
+
 ---
 
 ## Accepted permanently
@@ -210,6 +221,41 @@ the warning.
 
 ---
 
+## Execution policies and metadata forwarding: deferred, each with its reopen trigger
+
+Recorded by the execution policy design
+([`superpowers/specs/2026-11-01-qspec-execution-policy-design.md`](superpowers/specs/2026-11-01-qspec-execution-policy-design.md),
+section 9, and QSpec issue #1). Each was considered and left out of 0.2.0 on purpose.
+
+| Deferred                                                    | Reopen when                                                                                                                                                           |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A prepare-time policy phase                                 | a host shows that a pure admission check exported by its policy package cannot serve its admission                                                                    |
+| Verdict caching in core                                     | `policy:decision.durationMs` shows uncacheable policy cost as a significant share of execution time                                                                   |
+| Metadata on `TransformContext`                              | a transform needs per-execution host context                                                                                                                          |
+| A `policyTimeoutMs` limit                                   | a policy is observed to hang an execution despite the caller's signal                                                                                                 |
+| Parallel policy evaluation                                  | sequential latency of several independent policies is measured as a problem                                                                                           |
+| Ordered iteration on the public `Registry<T>` interface     | a second registry needs registration order                                                                                                                            |
+| `locale` and `timezone` on the policy input                 | a policy needs them                                                                                                                                                   |
+| A `metadata(request)` option on `@qspecs/http`'s handler    | a host mounting `createQSpecHandler` needs its policies or sources to see per-request context (a viewer, a tenant)                                                    |
+| A pre-validation policy phase (before parameter validation) | a host needs a policy to refuse a caller before parameter issues (an enum's allowed values, say) reach that caller, and authorizing in front of QSpec cannot serve it |
+
+The last row is narrower than the design proposed. The design adds an optional
+`QSpecHandlerOptions.metadata?: (request) => ...` whose result becomes `ExecutionContext.metadata`;
+0.2.0 ships without it, so `createQSpecHandler` still executes with parameters and the request's
+signal only, and a handler-served execution's policies and source see `metadata: undefined`. A host
+that needs per-request metadata today calls `PreparedResource.execute({ parameters, signal,
+metadata })` from its own route instead of `createQSpecHandler`. A denial from a handler-served
+execution still maps to 403 without issues either way.
+
+**Parameter validation runs before policies.** Stage 3 runs first, so a caller whose parameters
+are invalid gets `ParameterValidationError` before any policy runs: over `@qspecs/http` that is a
+400 whose issues can describe a parameter's declared constraints (an enum's allowed values, for
+instance), and no `policy:decision` event fires for the request. This is by design (a policy
+decides on an execution of validated parameters; it is not resource-level authorization), but it
+means policies cannot hide a resource's parameter contract from a caller they would deny.
+Authorize callers before QSpec (around `createQSpecHandler`, or before `execute()`) for that. The
+new row above is the reopen trigger for a phase that runs policies earlier.
+
 ## SQL and PostgreSQL — recorded in this plan, for a future dialect adapter to weigh
 
 - **`@qspecs/sql` has no dialect awareness beyond the shared scanner.** `scanSql`
@@ -361,37 +407,24 @@ idleListener)`), and `_release` re-attaches the same listener every time a clien
   inline) and `ownKeys` (`packages/core/src/json.ts`, referenced only by its own test).
   `editDistance` is **not** dead — `suggest()` calls it at
   `packages/core/src/internal/suggest.ts:39`; it was listed here in error. **Plumbed but
-  never read:** `ExecutionContext.metadata`, `QSpecPlugin.version`,
-  `RawQueryResult.metadata.durationMs`, and `manifest:parse:start.bytes` — declared optional
-  on the payload type (`packages/core/src/types/events.ts:15`) but never _emitted_:
-  `prepare.ts:150` emits `{}`. (The byte count in `define.ts` is a different value, computed
-  for the `maxManifestBytes` check and used there.)
+  never read:** `QSpecPlugin.version`, `RawQueryResult.metadata.durationMs`, and
+  `manifest:parse:start.bytes`, which is declared optional on the payload type
+  (`packages/core/src/types/events.ts:15`) but never _emitted_: `prepare.ts:150` emits `{}`.
+  (The byte count in `define.ts` is a different value, computed for the `maxManifestBytes`
+  check and used there.)
 - **`UnsupportedApiVersionError` is exported but never constructed by application code**
   (`packages/core/src/errors.test.ts` constructs one inside a generic error-class table test) —
   the condition is emitted as an issue inside a `ManifestValidationError`, so no consumer can
   catch the class.
 - **`maxRows` is applied at normalize time and never re-checked**, so a transform can grow a
   dataset back past the cap.
-- **Two copies of `PARAMETER_REFERENCE`** exist — `packages/core/src/internal/bindings.ts:8`
-  and `packages/core/src/internal/validate/manifest.ts:14`. They accept exactly the same
-  strings; only the capture group differs (bindings reads `match?.[1]`, the validator slices
-  the prefix). One pattern, two places to edit.
-
-  The comment claim previously recorded here was wrong in both directions and is withdrawn.
-  The comment exists (`validate/manifest.ts:111`: "Matches compileBindings's message exactly
-  … so `validate` and `prepare` agree") and it is **true** — the undeclared-parameter message
-  is byte-identical at `validate/manifest.ts:122`, `bindings.ts:58`, and `bindings.ts:90`,
-  and `manifest.test.ts` pins the exact string and suggestion rather than trusting the
-  comment.
-
-  What actually diverges is the pair of messages the comment does _not_ cover: for a
-  malformed string binding, `validate/manifest.ts:144` says "A string binding must be a
-  parameter reference…" while `bindings.ts:50` says `Binding "x" must be a parameter
-reference…`; the "exactly one of" object-shape message differs the same way
-  (`validate/manifest.ts:164` vs `bindings.ts:78`). So `qspec validate` and `prepare()` word
-  the same defect differently on those paths, which is the gap the comment was trying to
-  close.
-
+- **`qspec validate` and `prepare()` word two malformed-binding defects differently.** Both now
+  classify a binding through the one rule, `describeBinding`
+  (`packages/core/src/internal/bindings.ts`), so they always agree on _whether_ a binding is
+  malformed, and the undeclared-parameter message is byte-identical in both. For a malformed string
+  binding, though, the structural validator (`validate/manifest.ts`) says "A string binding must be
+  a parameter reference..." while `compileBindings` says `Binding "x" must be a parameter
+reference...`; the "exactly one of" object-shape message differs the same way.
 - **The CLI prints a duplicate line** for "must be a JSON object" and unsafe-key errors,
   where the aggregate message and the sole issue message are identical.
 - **`closest()` in `packages/transforms/src/internal/issues.ts` duplicates

@@ -9,11 +9,12 @@ import {
   type QSpecIssue,
 } from "../errors.js";
 import { parseManifest } from "../define.js";
-import { deepFreeze } from "../json.js";
+import { createRow, deepFreeze, setKey } from "../json.js";
 import type { DatasetSchema, Field } from "../types/dataset.js";
 import type { QSpecManifest, QSpecResourceSpec, TransformDefinition } from "../types/manifest.js";
 import type { PresentationDefinition, PresentationType } from "../types/presentation.js";
 import type { DataSource, QueryLanguage, ResourceKind, Transform } from "../types/plugin.js";
+import type { PolicyBinding } from "../types/policy.js";
 import type { QueryDefinition } from "../types/query.js";
 import type { ExecutionContext, PreparedResource, QSpecResult } from "../types/runtime.js";
 import { compileBindings, type CompiledBinding } from "./bindings.js";
@@ -33,7 +34,7 @@ export interface PreparedTransform {
 }
 
 /**
- * The resolved query, or nothing at all. Grouping these six values into one
+ * The resolved query, or nothing at all. Grouping these values into one
  * optional record makes the invariant structural: "a language implies a source
  * implies a definition" is enforced by the type rather than by four correlated
  * `| undefined` fields that execute() would have to re-check (or assert away).
@@ -45,15 +46,24 @@ export interface PreparedQuery {
   readonly source: DataSource;
   readonly sourceName: string;
   readonly bindings: readonly CompiledBinding[];
+  /**
+   * `bindings` as an execution policy sees them: what each one reads, never a literal's value.
+   * Built once here, frozen, and null-prototype so a binding named like an `Object.prototype`
+   * member reads as absent rather than as an inherited function. (policy design 3.4)
+   */
+  readonly policyBindings: Readonly<Record<string, PolicyBinding>>;
 }
 
 /**
- * Carries only what execute() actually reads. The manifest and the projected
- * field list are deliberately absent: execute() needs neither (it reads
- * `datasetSchema` directly), and the projection is a prepare-time artifact
- * whose only consumer is the `projectedFields` name list on PreparedResource.
+ * Carries only what execute() actually reads. The manifest is here for the
+ * execution policies alone (`ExecutionPolicyInput.manifest`); the rest of
+ * execute() reads the parts it needs (`datasetSchema`, `presentation`) directly.
+ * The projected field list is deliberately absent: it is a prepare-time
+ * artifact whose only consumer is the `projectedFields` name list on
+ * PreparedResource.
  */
 export interface PreparedPlan {
+  readonly manifest: QSpecManifest<QSpecResourceSpec>;
   readonly kind: string;
   readonly name: string;
   readonly parameters: CompiledParameters;
@@ -135,6 +145,26 @@ function freezeFields(fields: readonly Field[]): readonly Field[] {
 function freezeParameters(parameters: CompiledParameters): CompiledParameters {
   Object.freeze(parameters.names);
   return Object.freeze(parameters);
+}
+
+/**
+ * `compileBindings` classified every binding through `describeBinding`, so this is that same
+ * description per name, with the literal value dropped.
+ */
+function describeBindings(
+  bindings: readonly CompiledBinding[],
+): Readonly<Record<string, PolicyBinding>> {
+  const described = createRow<PolicyBinding>();
+  for (const binding of bindings) {
+    setKey(
+      described,
+      binding.name,
+      binding.kind === "parameter"
+        ? Object.freeze({ kind: "parameter", parameter: binding.parameter })
+        : Object.freeze({ kind: "literal" }),
+    );
+  }
+  return Object.freeze(described);
 }
 
 /**
@@ -235,7 +265,15 @@ export function prepareResource(
       `Query language "${languageName}" rejected \`spec.query\`.`,
     );
 
-    query = { definition: declaredQuery, language, languageName, source, sourceName, bindings };
+    query = {
+      definition: declaredQuery,
+      language,
+      languageName,
+      source,
+      sourceName,
+      bindings,
+      policyBindings: describeBindings(bindings),
+    };
   }
 
   // Stage 6 input: project the field schema through the transform pipeline.
@@ -327,6 +365,7 @@ export function prepareResource(
   // reference (`query.language`, `query.source`, `transform.implementation`)
   // are referenced but never frozen, because they belong to the plugin.
   const plan: PreparedPlan = Object.freeze({
+    manifest,
     kind: manifest.kind,
     name: manifest.metadata.name,
     parameters: freezeParameters(parameters),

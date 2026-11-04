@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DatasetValidationError,
+  ExecutionContextError,
   ParameterValidationError,
   QSpecAbortError,
   QueryExecutionError,
@@ -8,7 +9,9 @@ import {
 } from "../errors.js";
 import { definePlugin } from "../define.js";
 import type { Dataset, RawQueryResult } from "../types/dataset.js";
+import type { QSpecEventName } from "../types/events.js";
 import type { DataSourceContext, Transform } from "../types/plugin.js";
+import type { ExecutionContext } from "../types/runtime.js";
 import { createQSpec } from "./runtime.js";
 
 const rows: RawQueryResult = {
@@ -431,5 +434,218 @@ describe("execute", () => {
     await prepared.execute({ parameters: { from: "2026-01-01" } });
     await prepared.execute({ parameters: { from: "2026-02-01" } });
     expect(compile).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * Every lifecycle event name. `satisfies Record<QSpecEventName, true>` makes a
+ * missing name a compile error, so "a handler on every event" cannot silently
+ * skip one added later.
+ */
+const ALL_EVENTS = Object.keys({
+  "manifest:parse:start": true,
+  "manifest:parse:end": true,
+  "validation:start": true,
+  "validation:end": true,
+  "query:compile:start": true,
+  "query:compile:end": true,
+  "query:execute:start": true,
+  "query:execute:end": true,
+  "dataset:normalize:duplicate-column": true,
+  "transform:start": true,
+  "transform:end": true,
+  "policy:decision": true,
+  "execution:complete": true,
+  "execution:error": true,
+} satisfies Record<QSpecEventName, true>) as QSpecEventName[];
+
+describe("execute: ExecutionContext.metadata", () => {
+  /** A runtime whose source records the context it received. */
+  function recording(execute?: () => Promise<RawQueryResult>) {
+    const contexts: DataSourceContext[] = [];
+    const { qspec, compile } = build({
+      execute: async (_query, context) => {
+        contexts.push(context);
+        return execute === undefined ? rows : execute();
+      },
+    });
+    return { qspec, compile, contexts };
+  }
+
+  const parameters = { from: "2026-01-01" };
+
+  it("hands the source a frozen shallow copy whose values are the caller's own references", async () => {
+    const { qspec, contexts } = recording();
+    const tx = { query: () => undefined };
+    const metadata = { tx, tenant: "t1" };
+    await qspec.execute(manifest, { parameters, metadata });
+    const received = contexts[0]?.metadata;
+    expect(received).toEqual({ tx, tenant: "t1" });
+    expect(Object.keys(received ?? {})).toEqual(["tx", "tenant"]);
+    expect(received?.["tx"]).toBe(tx);
+    expect(Object.isFrozen(received)).toBe(true);
+    // Values are not frozen: a transaction handle must stay a live object.
+    expect(Object.isFrozen(tx)).toBe(false);
+  });
+
+  it("copies: a later change to the caller's object does not reach the copy", async () => {
+    const { qspec, contexts } = recording();
+    const metadata: Record<string, unknown> = { tenant: "t1" };
+    await qspec.execute(manifest, { parameters, metadata });
+    metadata["tenant"] = "t2";
+    metadata["added"] = true;
+    const received = contexts[0]?.metadata;
+    expect(received).not.toBe(metadata);
+    expect(received).toEqual({ tenant: "t1" });
+  });
+
+  it("leaves the context exactly as it was when metadata is omitted", async () => {
+    const { qspec, contexts } = recording();
+    await qspec.execute(manifest, { parameters });
+    const received = contexts[0];
+    expect(received?.metadata).toBeUndefined();
+    expect(received === undefined ? true : Object.hasOwn(received, "metadata")).toBe(false);
+    expect(Object.keys(received ?? {}).sort()).toEqual(
+      ["executionId", "locale", "logger", "signal", "timezone"].sort(),
+    );
+  });
+
+  it.each<{ readonly label: string; readonly metadata: unknown }>([
+    { label: "a string", metadata: "x" },
+    { label: "an array", metadata: [] },
+    { label: "a Map", metadata: new Map([["tenant", "t1"]]) },
+    { label: "a class instance", metadata: new (class Scope {})() },
+    { label: "null", metadata: null },
+    { label: "a number", metadata: 7 },
+  ])("rejects $label before stage 3 and never calls the source", async ({ metadata }) => {
+    const { qspec, compile, contexts } = recording();
+    const handler = vi.fn();
+    qspec.on("validation:start", handler);
+    // `parameters: {}` would fail stage 3; the context error must win.
+    const context = { parameters: {}, metadata } as unknown as ExecutionContext;
+    const error: unknown = await qspec
+      .execute(manifest, context)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ExecutionContextError);
+    expect((error as ExecutionContextError).path).toEqual(["metadata"]);
+    expect((error as ExecutionContextError).code).toBe("QSPEC_EXECUTION_CONTEXT_INVALID");
+    expect(handler.mock.calls.filter(([payload]) => payload.stage === "parameters")).toEqual([]);
+    expect(compile).not.toHaveBeenCalled();
+    expect(contexts).toHaveLength(0);
+  });
+
+  it("accepts a null-prototype object, which isPlainObject treats as plain", async () => {
+    const { qspec, contexts } = recording();
+    const metadata: Record<string, unknown> = Object.create(null);
+    metadata["tenant"] = "t1";
+    await qspec.execute(manifest, { parameters, metadata });
+    expect(contexts[0]?.metadata).toEqual({ tenant: "t1" });
+  });
+
+  it("keeps an own __proto__ key as data, without changing the copy's prototype", async () => {
+    const { qspec, contexts } = recording();
+    const metadata = JSON.parse('{"__proto__": {"polluted": true}, "tenant": "t1"}') as Record<
+      string,
+      unknown
+    >;
+    await qspec.execute(manifest, { parameters, metadata });
+    const received = contexts[0]?.metadata;
+    expect(received === undefined ? false : Object.hasOwn(received, "__proto__")).toBe(true);
+    // The copy has no prototype at all, like every dataset row and `policyBindings`.
+    expect(Object.getPrototypeOf(received)).toBeNull();
+    expect((received as { polluted?: unknown } | undefined)?.polluted).toBeUndefined();
+  });
+
+  it("hands the source a null-prototype copy, so an inherited name reads as absent", async () => {
+    const { qspec, contexts } = recording();
+    await qspec.execute(manifest, { parameters, metadata: { tenant: "t1" } });
+    const received = contexts[0]?.metadata;
+    expect(Object.getPrototypeOf(received)).toBeNull();
+    expect(received?.["toString"]).toBeUndefined();
+    expect(received?.["tenant"]).toBe("t1");
+  });
+
+  it("turns a throwing metadata getter into ExecutionContextError with a fixed message", async () => {
+    const { qspec, compile, contexts } = recording();
+    const failures: string[] = [];
+    qspec.on("execution:error", (payload) => void failures.push(payload.code));
+    const metadata = {
+      tenant: "t1",
+      get viewer(): unknown {
+        throw new Error("HOST_SECRET_FROM_GETTER");
+      },
+    };
+    const error: unknown = await qspec
+      .execute(manifest, { parameters, metadata })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ExecutionContextError);
+    expect((error as ExecutionContextError).path).toEqual(["metadata"]);
+    expect((error as ExecutionContextError).message).not.toContain("HOST_SECRET");
+    expect((error as ExecutionContextError).cause).toBeUndefined();
+    expect(failures).toEqual(["QSPEC_EXECUTION_CONTEXT_INVALID"]);
+    expect(compile).not.toHaveBeenCalled();
+    expect(contexts).toHaveLength(0);
+  });
+
+  it("turns a proxy whose traps throw into ExecutionContextError", async () => {
+    const { qspec, contexts } = recording();
+    const metadata = new Proxy(
+      {},
+      {
+        getPrototypeOf() {
+          throw new Error("HOST_SECRET_FROM_TRAP");
+        },
+      },
+    );
+    const error: unknown = await qspec
+      .execute(manifest, { parameters, metadata })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ExecutionContextError);
+    expect((error as Error).message).not.toContain("HOST_SECRET");
+    expect(contexts).toHaveLength(0);
+  });
+
+  it("never puts a metadata key or value in a log line, an event payload, or an error", async () => {
+    const VALUE = "SENTINEL_METADATA_VALUE";
+    const KEY = "SENTINEL_METADATA_KEY";
+    const logged: unknown[] = [];
+    const record = (...args: unknown[]) => void logged.push(args);
+    const logger = { debug: record, info: record, warn: record, error: record };
+    const qspec = createQSpec({ logger }).use(
+      definePlugin({
+        name: "failing",
+        setup(api) {
+          api.resources.register("Chart", { requiresQuery: true, requiresPresentation: true });
+          api.queryLanguages.register("sql", { compile: (query) => query.statement });
+          api.sources.register("analytics", {
+            execute: async () => {
+              throw new Error("source failed");
+            },
+          });
+          api.presentations.register("line", {});
+        },
+      }),
+    );
+    const payloads: unknown[] = [];
+    for (const event of ALL_EVENTS) {
+      qspec.on(event, (payload) => {
+        payloads.push(payload);
+        // A throwing handler drives core's own logger.warn path.
+        throw new Error("handler failed");
+      });
+    }
+    const error: unknown = await qspec
+      .execute(manifest, { parameters, metadata: { [KEY]: VALUE, nested: { deep: VALUE } } })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(QueryExecutionError);
+    expect(payloads.length).toBeGreaterThan(0);
+    expect(logged.length).toBeGreaterThan(0);
+    const seen = JSON.stringify({
+      payloads,
+      logged: logged.map((args) => String(args)),
+      message: error instanceof Error ? error.message : String(error),
+    });
+    expect(seen).not.toContain(VALUE);
+    expect(seen).not.toContain(KEY);
   });
 });

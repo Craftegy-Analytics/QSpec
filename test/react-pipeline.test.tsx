@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { Suspense, type ReactNode } from "react";
+import { Component, Suspense, type ReactNode } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,9 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { getContainerRuntimeClient } from "testcontainers";
 import {
   QSPEC_V1,
+  QSpecError,
   createQSpec,
+  definePlugin,
   type PresentationDefinition,
   type QSpec,
   type QSpecResult,
@@ -125,6 +127,9 @@ let container: StartedPostgreSqlContainer | undefined;
 let admin: Client | undefined;
 let runtime: QSpec | undefined;
 let executor: QSpecExecutor | undefined;
+/** A second server: the same manifest and plugins, plus an execution policy that denies it. */
+let deniedRuntime: QSpec | undefined;
+let deniedExecutor: QSpecExecutor | undefined;
 
 /** Reset and reassigned in `beforeEach`; see that hook and the paired `afterEach`. */
 const consoleErrorCalls: string[] = [];
@@ -316,6 +321,51 @@ function Dashboard({ from, to }: { from: string; to: string }): ReactNode {
   );
 }
 
+/**
+ * What the denying server's policy reports. Its message names the table and a column, exactly the
+ * kind of detail a real statement guard reports, so the leak checks can prove it stays on the
+ * server.
+ */
+const DENIAL_ISSUE = {
+  code: "relation.not-readable",
+  message: 'Relation "sales" (column occurred_on) is not readable by this viewer.',
+  path: ["spec", "query", "statement"],
+} as const;
+
+/** Renders a caught error's code and message: the "rendered error" a user would see. */
+class ErrorPanel extends Component<{ children: ReactNode }, { error: unknown }> {
+  override state: { error: unknown } = { error: undefined };
+
+  static getDerivedStateFromError(error: unknown): { error: unknown } {
+    return { error };
+  }
+
+  override render(): ReactNode {
+    const { error } = this.state;
+    if (error === undefined) return this.props.children;
+    return (
+      <div data-testid="error">
+        {error instanceof QSpecError ? `${error.code}: ${error.message}` : String(error)}
+      </div>
+    );
+  }
+}
+
+function DeniedDashboard({ from, to }: { from: string; to: string }): ReactNode {
+  if (deniedExecutor === undefined) throw new Error("the denied executor has not been created");
+  return (
+    <QSpecProvider executor={deniedExecutor}>
+      <ErrorPanel>
+        <Suspense fallback={<div data-testid="fallback" />}>
+          <QSpecResource resource={RESOURCE} parameters={{ from, to }}>
+            {() => <div data-testid="chart" />}
+          </QSpecResource>
+        </Suspense>
+      </ErrorPanel>
+    </QSpecProvider>
+  );
+}
+
 // --- Rendering helpers (see use-qspec-query.test.tsx for why act is awaited) -
 
 /**
@@ -423,6 +473,28 @@ describeIntegration(suiteName, () => {
     // The client: a URL and nothing else. `fetchViaHandler` stands in for
     // the network between them.
     executor = createHttpExecutor({ url: ENDPOINT, fetch: fetchViaHandler(handler) });
+
+    deniedRuntime = createQSpec()
+      .use(sql())
+      .use(postgres({ sources: { [SOURCE]: { connectionString: connectionUri() } } }))
+      .use(transforms())
+      .use(charts())
+      .use(
+        definePlugin({
+          name: "test/deny-sales",
+          setup(api) {
+            api.policies.register("deny-sales", {
+              check: () => ({ outcome: "deny", issues: [DENIAL_ISSUE] }),
+            });
+          },
+        }),
+      );
+    await deniedRuntime.ready();
+    const deniedHandler = createQSpecHandler({
+      runtime: deniedRuntime,
+      manifests: { [RESOURCE]: manifestJson() },
+    });
+    deniedExecutor = createHttpExecutor({ url: ENDPOINT, fetch: fetchViaHandler(deniedHandler) });
   });
 
   afterAll(async () => {
@@ -430,9 +502,13 @@ describeIntegration(suiteName, () => {
       await runtime?.dispose();
     } finally {
       try {
-        await admin?.end();
+        await deniedRuntime?.dispose();
       } finally {
-        await container?.stop();
+        try {
+          await admin?.end();
+        } finally {
+          await container?.stop();
+        }
       }
     }
   });
@@ -462,9 +538,11 @@ describeIntegration(suiteName, () => {
 
   afterEach(() => {
     consoleErrorSpy?.mockRestore();
-    // None of this file's three tests exercises a caught-error path (that is
-    // packages/react/src/internal/use-qspec-query.test.tsx's job) -- every
-    // render here either suspends to a settled DOM or re-fetches cleanly. So
+    // No test here lets a caught error reach console.error (the caught-error
+    // path in general is packages/react/src/internal/use-qspec-query.test.tsx's
+    // job): every render either suspends to a settled DOM or re-fetches
+    // cleanly, and the one denied-request test hands its single expected
+    // error to `onCaughtError` and asserts on it there. So
     // unlike that file's `mockConsoleError`, which asserts every call
     // contains an *expected* fragment, this asserts there were no calls at
     // all: the "pristine output" this suite's tests rely on (no stray React
@@ -594,6 +672,62 @@ describeIntegration(suiteName, () => {
       ok: true,
       result: { meta: { query: { source: SOURCE, language: "sql" } } },
     });
+  });
+
+  it("carries no SQL, table name, or policy detail to the client when a policy denies", async () => {
+    const caught: unknown[] = [];
+    await act(async () => {
+      // Handled here instead of by React's default console.error logging: this test expects
+      // exactly one caught error, and the console guard in afterEach stays strict.
+      render(<DeniedDashboard from={FIRST_RANGE.from} to={FIRST_RANGE.to} />, {
+        onCaughtError: (error) => void caught.push(error),
+      });
+    });
+    const panel = await screen.findByTestId("error");
+    expect(panel.textContent).toBe(
+      "QSPEC_EXECUTION_DENIED: The request was refused by an execution policy.",
+    );
+    expect(caught).toHaveLength(1);
+    expect(screen.queryByTestId("chart")).toBeNull();
+
+    const sent = requestBodies.at(-1);
+    const received = responseBodies.at(-1);
+    if (sent === undefined || received === undefined) {
+      throw new Error("no request/response pair was recorded");
+    }
+    expect(JSON.parse(sent)).toEqual({
+      resource: RESOURCE,
+      parameters: { from: FIRST_RANGE.from, to: FIRST_RANGE.to },
+    });
+    // Exactly the code and the fixed message: no issues array crossed the wire.
+    expect(JSON.parse(received)).toEqual({
+      ok: false,
+      error: {
+        code: "QSPEC_EXECUTION_DENIED",
+        message: "The request was refused by an execution policy.",
+      },
+    });
+
+    const secrets = [
+      DB_PASSWORD,
+      DB_USER,
+      DB_NAME,
+      connectionUri(),
+      "SELECT",
+      "sales",
+      "occurred_on",
+      ":from",
+      "$parameters.from",
+      "deny-sales",
+      DENIAL_ISSUE.code,
+      DENIAL_ISSUE.message,
+    ];
+    const dom = document.body.innerHTML;
+    for (const secret of secrets) {
+      expect(sent, `request body leaked ${secret}`).not.toContain(secret);
+      expect(received, `response body leaked ${secret}`).not.toContain(secret);
+      expect(dom, `rendered DOM leaked ${secret}`).not.toContain(secret);
+    }
   });
 
   it("changing a parameter re-executes against PostgreSQL and updates the chart", async () => {

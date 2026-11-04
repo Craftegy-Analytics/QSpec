@@ -8,10 +8,9 @@ import {
 } from "../../types/manifest.js";
 import type { ParameterDefinition } from "../../types/parameters.js";
 import { SUPPORTED_API_VERSIONS } from "../../version.js";
+import { describeBinding } from "../bindings.js";
 import { suggest } from "../suggest.js";
 import { collectDefaultIssues } from "./parameters.js";
-
-const PARAMETER_REFERENCE = /^\$parameters\.[A-Za-z_][A-Za-z0-9_]*$/;
 
 const PARAMETER_TYPES: ReadonlySet<string> = new Set([
   "string",
@@ -137,44 +136,30 @@ function validateBindings(
   }
   for (const [name, binding] of Object.entries(bindings)) {
     const path = [...base, name];
-    if (typeof binding === "string") {
-      const match = PARAMETER_REFERENCE.exec(binding);
-      if (match === null) {
-        collector.add(
-          'A string binding must be a parameter reference of the form "$parameters.<name>". ' +
-            'To bind a constant, use { "literal": ... } instead.',
-          path,
-        );
-      } else {
-        checkDeclaredParameter(
-          binding.slice("$parameters.".length),
-          name,
-          path,
-          declaredParameters,
-          collector,
-        );
-      }
+    // Classified by the same rule compileBindings uses (bindings.ts), so
+    // `qspec validate` and prepare() cannot disagree about what a binding is.
+    const described = describeBinding(binding);
+    if (described?.kind === "parameter") {
+      checkDeclaredParameter(described.parameter, name, path, declaredParameters, collector);
+    } else if (described?.kind === "literal") {
+      continue;
+    } else if (typeof binding === "string") {
+      collector.add(
+        'A string binding must be a parameter reference of the form "$parameters.<name>". ' +
+          'To bind a constant, use { "literal": ... } instead.',
+        path,
+      );
     } else if (isPlainObject(binding)) {
-      // Presence and type are checked separately. Conflating them lets
-      // { parameter: 5, literal: "x" } slip through: a wrongly-typed
-      // `parameter` reads as absent, so "both present" looks like "exactly one".
+      // Not a binding; name which part of the object shape is wrong.
       const hasParameter = Object.hasOwn(binding, "parameter");
       const hasLiteral = Object.hasOwn(binding, "literal");
       if (hasParameter === hasLiteral) {
         collector.add('A binding object must have exactly one of "parameter" or "literal".', path);
-      } else if (hasParameter && typeof binding["parameter"] !== "string") {
-        collector.add('A binding\'s "parameter" must be a string.', path);
       } else if (hasParameter) {
-        checkDeclaredParameter(
-          binding["parameter"] as string,
-          name,
-          path,
-          declaredParameters,
-          collector,
-        );
-      } else if (hasLiteral && binding["literal"] === undefined) {
+        collector.add('A binding\'s "parameter" must be a string.', path);
+      } else {
         // Object.hasOwn is true for an explicitly-undefined property, so a
-        // presence check alone lets { "literal": undefined } through — and
+        // presence check alone lets { "literal": undefined } through, and
         // undefined is not a JsonValue. Unreachable from JSON text, but the
         // already-parsed-object input path can produce it.
         collector.add(

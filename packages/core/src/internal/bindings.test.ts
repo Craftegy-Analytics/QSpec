@@ -1,7 +1,9 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ManifestValidationError } from "../errors.js";
 import { compileParameters } from "./validate/parameters.js";
-import { compileBindings, resolveBindings } from "./bindings.js";
+import { compileBindings, describeBinding, resolveBindings } from "./bindings.js";
 import type { Binding } from "../types/query.js";
 
 const declared = compileParameters({
@@ -102,5 +104,81 @@ describe("resolveBindings", () => {
     const resolved = resolveBindings(compileBindings({}, declared, at), {});
     expect(Object.getPrototypeOf(resolved)).toBeNull();
     expect(Object.isFrozen(resolved)).toBe(true);
+  });
+});
+
+describe("describeBinding", () => {
+  it("describes the string reference form", () => {
+    expect(describeBinding("$parameters.from")).toEqual({ kind: "parameter", parameter: "from" });
+  });
+
+  it("describes the object parameter form", () => {
+    expect(describeBinding({ parameter: "to" })).toEqual({ kind: "parameter", parameter: "to" });
+  });
+
+  it.each([[{ literal: "US" }], [{ literal: null }], [{ literal: { nested: [1, 2] } }]])(
+    "describes the literal form %j without its value",
+    (binding) => {
+      const described = describeBinding(binding);
+      expect(described).toEqual({ kind: "literal" });
+      expect(described === undefined ? false : Object.hasOwn(described, "value")).toBe(false);
+    },
+  );
+
+  it("describes a null-prototype binding object like a literal one", () => {
+    const binding: Record<string, unknown> = Object.create(null);
+    binding["parameter"] = "from";
+    expect(describeBinding(binding)).toEqual({ kind: "parameter", parameter: "from" });
+  });
+
+  it.each<readonly [unknown, string]>([
+    ["from", "a bare string"],
+    ["$parameter.from", "the singular prefix"],
+    ["$parameters.1x", "a name starting with a digit"],
+    ["$parameters.", "an empty name"],
+    ["$parameters.a.b", "a dotted name"],
+    [{}, "an object with neither key"],
+    [{ parameter: 1 }, "a non-string parameter"],
+    [{ parameter: "x", literal: 1 }, "both keys"],
+    [{ literal: undefined }, "an undefined literal"],
+    [[], "an array"],
+    [new (class Binding {})(), "a class instance"],
+    [null, "null"],
+    [42, "a number"],
+    [undefined, "undefined"],
+  ])("returns undefined for %j (%s)", (binding) => {
+    expect(describeBinding(binding)).toBeUndefined();
+  });
+
+  it("returns a frozen description", () => {
+    expect(Object.isFrozen(describeBinding("$parameters.from"))).toBe(true);
+    expect(Object.isFrozen(describeBinding({ literal: 1 }))).toBe(true);
+  });
+});
+
+describe("one binding rule", () => {
+  // Both former PARAMETER_REFERENCE call sites (compileBindings here and the
+  // structural validator in validate/manifest.ts) must classify a binding
+  // through describeBinding, so the rule has exactly one place to edit.
+  // Reads the sources, the way test/boundaries.test.ts does.
+  const sources = Promise.all(
+    ["bindings.ts", join("validate", "manifest.ts")].map((file) =>
+      readFile(join(import.meta.dirname, file), "utf8"),
+    ),
+  );
+
+  it("defines the parameter reference pattern exactly once", async () => {
+    const [bindings, manifest] = await sources;
+    const definition = /PARAMETER_REFERENCE\s*=/g;
+    expect(bindings?.match(definition)).toHaveLength(1);
+    expect(manifest?.match(definition) ?? []).toHaveLength(0);
+    expect(manifest).not.toContain("\\$parameters\\.");
+  });
+
+  it("classifies bindings through describeBinding at both call sites", async () => {
+    const [bindings, manifest] = await sources;
+    expect(bindings?.match(/describeBinding\(binding\)/g)?.length).toBeGreaterThanOrEqual(1);
+    expect(manifest).toMatch(/import \{[^}]*\bdescribeBinding\b[^}]*\} from "\.\.\/bindings\.js"/);
+    expect(manifest).toContain("describeBinding(binding)");
   });
 });

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DatasetValidationError,
+  ExecutionContextError,
+  ExecutionDeniedError,
+  ExecutionPolicyError,
   LimitExceededError,
   ManifestValidationError,
   ParameterValidationError,
@@ -123,6 +126,22 @@ const errorCases: readonly ErrorCase[] = [
     code: "QSPEC_LIMIT_EXCEEDED",
     create: () => new LimitExceededError("x"),
   },
+  {
+    name: "ExecutionDeniedError",
+    code: "QSPEC_EXECUTION_DENIED",
+    create: () => new ExecutionDeniedError({ policy: "p", issues: [] }),
+  },
+  {
+    name: "ExecutionPolicyError",
+    code: "QSPEC_POLICY_FAILED",
+    create: () => new ExecutionPolicyError("x", { policy: "p" }),
+  },
+  {
+    name: "ExecutionContextError",
+    code: "QSPEC_EXECUTION_CONTEXT_INVALID",
+    create: () => new ExecutionContextError("x", ["metadata"]),
+    path: ["metadata"],
+  },
 ];
 
 describe.each(errorCases)("$name", ({ name, code, create, path }) => {
@@ -145,6 +164,40 @@ describe("concrete error classes", () => {
     });
     expect(error.issues).toHaveLength(1);
     expect(error.issues[0]?.path).toEqual(["metadata", "name"]);
+  });
+});
+
+describe("execution policy errors", () => {
+  const issues = [
+    { code: "shape.select-only", message: "SECRET_TABLE is not readable", path: ["spec", "query"] },
+    { code: "shape.no-writes", message: "writes are refused", path: [] },
+  ] as const;
+
+  it("ExecutionDeniedError carries the policy name and the issues, also as details", () => {
+    const error = new ExecutionDeniedError({ policy: "guard", issues });
+    expect(error.policy).toBe("guard");
+    expect(error.issues).toBe(issues);
+    expect(error.details).toBe(issues);
+  });
+
+  it("ExecutionDeniedError names the policy and the count, never an issue message", () => {
+    const two = new ExecutionDeniedError({ policy: "guard", issues });
+    expect(two.message).toBe('Execution policy "guard" denied the execution (2 problems).');
+    for (const issue of issues) expect(two.message).not.toContain(issue.message);
+
+    const one = new ExecutionDeniedError({ policy: "guard", issues: issues.slice(0, 1) });
+    expect(one.message).toBe('Execution policy "guard" denied the execution (1 problem).');
+  });
+
+  it("ExecutionPolicyError carries the policy name and the cause", () => {
+    const cause = new Error("inner");
+    const error = new ExecutionPolicyError("failed", { policy: "guard", cause });
+    expect(error.policy).toBe("guard");
+    expect(error.cause).toBe(cause);
+  });
+
+  it("ExecutionContextError carries the path it was given", () => {
+    expect(new ExecutionContextError("bad", ["metadata"]).path).toEqual(["metadata"]);
   });
 });
 

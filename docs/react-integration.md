@@ -163,7 +163,10 @@ Two implementations ship:
 - **`createHttpExecutor`** (`@qspecs/http`) — sends a `resource`/`parameters` request across a real
   HTTP boundary to a server running `createQSpecHandler`. This is the shape for a browser talking
   to a separate server process; see [Security](security.md) for what does and does not cross that
-  boundary, and why it is unauthenticated by design.
+  boundary, and why it is unauthenticated by design. A request a server-side execution policy
+  denies arrives as a 403 and rejects as a base `QSpecError` with code `QSPEC_EXECUTION_DENIED`,
+  without the policy's issues; `createLocalExecutor`, which calls the runtime in-process, rejects
+  with the `ExecutionDeniedError` itself.
 - **`createLocalExecutor(runtime, manifests)`** (`@qspecs/react`,
   `packages/react/src/internal/local-executor.ts`) — resolves a resource name against a fixed
   manifest registry and calls `runtime.execute(manifest, context)` directly, with no HTTP hop at

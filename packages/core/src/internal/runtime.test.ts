@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { PluginRegistrationError, UnknownResourceKindError } from "../errors.js";
 import { definePlugin } from "../define.js";
+import type { ExecutionPolicy } from "../types/policy.js";
 import { createQSpec } from "./runtime.js";
 
 const minimal = {
@@ -187,6 +188,28 @@ describe("createQSpec", () => {
     await qspec.ready();
     await qspec.dispose();
     expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("hands every plugin the policies registry", async () => {
+    let seen: boolean | undefined;
+    const qspec = createQSpec().use(
+      definePlugin({
+        name: "inspect-policies",
+        setup(api) {
+          seen = typeof api.policies.register === "function" && api.policies.list().length === 0;
+        },
+      }),
+    );
+    await qspec.ready();
+    expect(seen).toBe(true);
+  });
+
+  it("rejects a duplicate policy name across plugins", async () => {
+    const allow: ExecutionPolicy = { check: () => ({ outcome: "allow" }) };
+    const qspec = createQSpec()
+      .use(definePlugin({ name: "first", setup: (api) => api.policies.register("guard", allow) }))
+      .use(definePlugin({ name: "second", setup: (api) => api.policies.register("guard", allow) }));
+    await expect(qspec.ready()).rejects.toThrow(/execution policy named "guard"/);
   });
 
   it("accepts a JSON string manifest", async () => {

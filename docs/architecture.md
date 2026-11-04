@@ -4,7 +4,9 @@ This document explains how this repository implements [`SPEC.md`](../SPEC.md). I
 restate the specification; it maps specification requirements onto the modules that satisfy
 them. Where a decision was left open by SPEC.md, it links to the section of
 [`docs/superpowers/specs/2026-08-09-qspec-design.md`](superpowers/specs/2026-08-09-qspec-design.md)
-("the design document") that resolves it.
+("the design document") that resolves it, or, for execution policies and metadata forwarding, of
+[`docs/superpowers/specs/2026-11-01-qspec-execution-policy-design.md`](superpowers/specs/2026-11-01-qspec-execution-policy-design.md)
+("the policy design").
 
 ## 1. Pipeline
 
@@ -35,6 +37,9 @@ The conceptual pipeline (SPEC.md §1) is realized as the concrete runtime pipeli
                   Query Compiler
                            │
                            ▼
+                Execution Policies
+                           │
+                           ▼
                 Data Source Adapter
                            │
                            ▼
@@ -62,6 +67,28 @@ The conceptual pipeline (SPEC.md §1) is realized as the concrete runtime pipeli
 Every capability box below "Manifest Parser" is registry-driven and replaceable by a plugin;
 core supplies only the pipeline shape and the `Dataset` resource kind.
 
+"Execution Policies" is the one box SPEC.md §10 does not draw: it is the policy layer SPEC.md §110
+leaves to the future ("allow a policy plugin or execution interceptor to approve or reject
+execution"). Every registered `ExecutionPolicy` runs there, in registration order, on a value-free
+view of the compiled query, and the first denial stops the execution before the data source is
+called. A resource without `spec.query` reaches no data source; its policies run right after
+Parameter Validation instead, with `query: undefined`. With no policy registered the box is
+skipped entirely. See [§4](#4-resolved-design-decisions) for the decisions behind it.
+
+The box sits **after** Parameter Validation, deliberately and with a consequence worth stating: a
+caller whose parameters fail stage 3 gets `ParameterValidationError` (400 over `@qspecs/http`,
+with issues that can name a parameter's declared constraints, an enum's allowed values for
+instance) before any policy is consulted, and no `policy:decision` event fires for that request.
+Execution policies decide whether an execution of validated parameters may run against a source;
+they are not resource-level authorization. Deciding whether a caller may use a resource at all
+belongs in front of QSpec (around `createQSpecHandler`, or before `execute()`), or in a future
+pre-validation phase the policy design reserves (`docs/known-gaps.md`).
+
+Every `PreparedResource.execute()` also awaits the runtime's `ready()` before it reads the policy
+list. A prepared resource outlives the moment it was prepared, so without that a policy plugin
+queued later, or one whose `setup()` failed, would leave resources prepared earlier executing
+with no guard.
+
 ## 2. `prepare()` versus `execute()`
 
 `createQSpec().prepare(manifest)` performs all static work exactly once per manifest; the
@@ -77,6 +104,7 @@ depends on runtime parameters or a live data source (design §4).
 | `prepare()` | Fold `Transform.describe` across the pipeline; validate presentation field references against the projected schema | Stage 6             |
 | `execute()` | Validate runtime parameter values                                                                                  | Stage 3             |
 | `execute()` | Resolve bindings; compile the query against the data source                                                        | Stage 4             |
+| `execute()` | Run execution policies on a value-free view of the compiled query (not a validation stage)                         | none                |
 | `execute()` | Normalize the raw result into a `Dataset`                                                                          | —                   |
 | `execute()` | Validate the returned dataset against `spec.dataset`, if declared                                                  | Stage 5             |
 | `execute()` | Run the transform pipeline, immutably; build the presentation model; return `QSpecResult`                          | —                   |
@@ -104,6 +132,15 @@ Stages 1, 2, and 6 run during `prepare()`; stages 3, 4, and 5 run during `execut
 above. `@qspecs/sql`'s `validateSqlQuery` (§9 below) is the concrete `QueryLanguage.validate`
 implementation that exercises stage 4 against a real query language, not just the contract.
 
+Execution policies are deliberately **not** a seventh stage. The six stages check the manifest,
+the parameters and the data against the manifest's own declarations; a policy checks the execution
+against host rules that differ per host and per execution (the same manifest can be allowed in one
+host and denied in another). A denial is therefore its own error, `ExecutionDeniedError`
+(`QSPEC_EXECUTION_DENIED`), which carries a `QSpecIssue[]` with absolute manifest paths but is not
+a validation error: `@qspecs/http` answers it with 403 and no issues, where a validation error is
+a 400 whose issues are forwarded (§10.1 below; policy design
+[3.6](superpowers/specs/2026-11-01-qspec-execution-policy-design.md#36-rejection-a-distinct-error-and-code-that-carries-an-issue-list-not-a-stage-7-specmd-70-71-80)).
+
 ## 4. Resolved design decisions
 
 SPEC.md is intentionally permissive in places where more than one implementation would
@@ -119,6 +156,17 @@ satisfy it. Each such gap is resolved in the design document, not silently in co
 - [Capability typing](superpowers/specs/2026-08-09-qspec-design.md#28-capability-typing-specmd-54) — literal-union capability tracking for autocomplete, not type-level manifest validation.
 - [Hooks, not middleware](superpowers/specs/2026-08-09-qspec-design.md#29-hooks-not-middleware-specmd-68-69) — v1 ships an observer-only lifecycle event emitter.
 - [Resource limits](superpowers/specs/2026-08-09-qspec-design.md#210-resource-limits-specmd-725) — `maxRows`, `maxTransforms`, `maxManifestBytes`, `maxExpressionDepth`, `queryTimeoutMs`, all enforced in core.
+- [One `policies` registry, not a single interceptor](superpowers/specs/2026-11-01-qspec-execution-policy-design.md#31-one-policies-registry-not-a-single-interceptor-specmd-50-51-69-110): the eighth registry, evaluated in registration order; the first denial wins; `replace()` keeps a policy's position.
+- [`prepare()` does not run policies](superpowers/specs/2026-11-01-qspec-execution-policy-design.md#33-prepare-does-not-run-policies-specmd-58-81): one authoritative evaluation per execution, on exactly what runs; early feedback comes from a policy package's own admission check, which `@qspecs/sql`'s `sqlPolicyView` makes exact for SQL.
+- [A distinct error carrying an issue list, not a stage 7](superpowers/specs/2026-11-01-qspec-execution-policy-design.md#36-rejection-a-distinct-error-and-code-that-carries-an-issue-list-not-a-stage-7-specmd-70-71-80): `ExecutionDeniedError` (`QSPEC_EXECUTION_DENIED`); a policy that throws or returns a malformed decision fails closed as `ExecutionPolicyError` (`QSPEC_POLICY_FAILED`).
+- [No verdict caching in core](superpowers/specs/2026-11-01-qspec-execution-policy-design.md#39-no-verdict-caching-in-core-specmd-82): a policy caches what it can prove is pure; a cached allow would outlive a change to the policy's configuration.
+- [Metadata forwarding](superpowers/specs/2026-11-01-qspec-execution-policy-design.md#310-metadata-forwarding-specmd-59-62-726): `ExecutionContext.metadata` must be a plain object; core makes one frozen shallow copy and hands it to every policy and to `DataSourceContext.metadata`, and never logs it.
+
+**SPEC.md §110 conformance.** Of §110's examples, "which sources may be queried", "which tables are
+allowed", "allowed query languages" and "allowed transforms" (read from the frozen manifest), and
+"which users may execute which resources" (from `ExecutionContext.metadata`), are each expressible
+as an `ExecutionPolicy`. "Maximum result size" is not, because a policy runs before any row exists;
+`limits.maxRows` (SPEC.md §72.5) already covers it.
 
 ## 5. Plugin authoring (SPEC.md §105)
 
@@ -150,8 +198,10 @@ const qspec = createQSpec().use(myPlugin);
 
 `setup(api)` receives a `QSpecPluginAPI` (`packages/core/src/types/plugin.ts`) exposing one
 registry per capability — `queryLanguages`, `sources`, `transforms`, `semanticTypes`,
-`resources`, `presentations`, `renderers` — plus `hooks.on` (observation only; plugins never
-emit lifecycle events, per design §2.9), `logger`, and the runtime's configured `limits`.
+`resources`, `presentations`, `renderers`, `policies`, plus `hooks.on` (observation only; plugins
+never emit lifecycle events, per design §2.9), `logger`, and the runtime's configured `limits`. A
+plugin that must be able to stop an execution registers an execution policy into `policies`;
+hooks stay observers.
 Registration happens during `qspec.ready()`, which every `prepare()` call awaits first, so a
 plugin queued via `.use()` is guaranteed to be installed before its capabilities are resolved.
 
@@ -427,6 +477,14 @@ test is the mechanical proof: it asserts the exact, closed set of keys the reque
 (`{ resource, parameters }`, nothing else) and greps the request body, the response body, and the
 rendered DOM for the statement text, the table name, and the credentials, none of which can appear
 because none of them are reachable from what the browser is capable of sending.
+
+A denial by an execution policy crosses this boundary the same way: `createQSpecHandler` answers
+`ExecutionDeniedError` with **403** and a body of exactly `{ code: "QSPEC_EXECUTION_DENIED",
+message }`, a fixed message, and **no issues**. A policy's issue messages name relations and
+columns from the statement, which this boundary keeps on the server exactly as it keeps the
+statement. The browser executor reconstructs the 403 as a base `QSpecError` carrying that code.
+The same React pipeline test proves it for a denied request: the response body and the rendered
+error contain no statement text, table or column name, policy name, or issue text.
 
 ### 10.2 Why `QueryCache` holds promises, not results
 

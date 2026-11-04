@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  ExecutionDeniedError,
   ManifestValidationError,
   PluginRegistrationError,
   QSPEC_V1,
   createQSpec,
   definePlugin,
+  type QueryLanguage,
 } from "@qspecs/core";
 import { memory } from "@qspecs/testing";
-import { sql } from "./index.js";
+import * as entry from "./index.js";
+import { isSqlPolicyView, scanSql, sql, sqlPolicyView } from "./index.js";
 
 describe("sql()", () => {
   it('registers exactly the language name "sql"', async () => {
@@ -133,5 +136,76 @@ describe("sql()", () => {
         },
       ]);
     }
+  });
+});
+
+describe("@qspecs/sql exports for execution policies", () => {
+  it("exports scanSql, sqlPolicyView and isSqlPolicyView", () => {
+    expect(typeof entry.scanSql).toBe("function");
+    expect(typeof entry.sqlPolicyView).toBe("function");
+    expect(typeof entry.isSqlPolicyView).toBe("function");
+    expect(scanSql("SELECT :a::date")).toEqual({
+      segments: ["SELECT ", "::date"],
+      parameterNames: ["a"],
+      positionalPlaceholder: undefined,
+    });
+  });
+
+  it("registers a language whose policyView is a function", async () => {
+    let language: QueryLanguage | undefined;
+    const qspec = createQSpec()
+      .use(sql())
+      .use(
+        definePlugin({
+          name: "inspect-sql-language",
+          setup(api) {
+            language = api.queryLanguages.get("sql");
+          },
+        }),
+      );
+    await qspec.ready();
+    expect(typeof language?.policyView).toBe("function");
+  });
+
+  it("hands a policy the same view sqlPolicyView computes statically, and never a value", async () => {
+    const views: unknown[] = [];
+    const memorySource = memory({ tables: { widgets: { columns: ["id"], rows: [[1]] } } });
+    const qspec = createQSpec()
+      .use(sql())
+      .use(memorySource)
+      .use(
+        definePlugin({
+          name: "capture-view",
+          setup(api) {
+            api.policies.register("capture", {
+              check(input) {
+                views.push(input.query?.view);
+                return { outcome: "deny", issues: [{ code: "stop", message: "stop", path: [] }] };
+              },
+            });
+          },
+        }),
+      );
+    const query = {
+      source: "widgets",
+      language: "sql",
+      statement: "SELECT id FROM widgets WHERE id = :id AND tag = ':id' AND kind = :kind",
+      bindings: { id: { literal: "SECRET_LITERAL" }, kind: "$parameters.kind" },
+    };
+    const manifest = {
+      apiVersion: QSPEC_V1,
+      kind: "Dataset",
+      metadata: { name: "widgets-report" },
+      spec: { parameters: { kind: { type: "string" } }, query },
+    };
+    await expect(
+      qspec.execute(manifest, { parameters: { kind: "SECRET_PARAMETER" } }),
+    ).rejects.toThrow(ExecutionDeniedError);
+    expect(views).toHaveLength(1);
+    const view = views[0];
+    expect(isSqlPolicyView(view)).toBe(true);
+    expect(view).toEqual(sqlPolicyView(query));
+    expect(JSON.stringify(view)).not.toMatch(/SECRET_/);
+    expect(memorySource.calls).toHaveLength(0);
   });
 });

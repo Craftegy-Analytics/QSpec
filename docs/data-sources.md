@@ -29,6 +29,7 @@ export interface DataSourceContext {
   readonly locale?: string | undefined;
   readonly timezone?: string | undefined;
   readonly logger: QSpecLogger;
+  readonly metadata?: Readonly<Record<string, unknown>> | undefined;
 }
 ```
 
@@ -41,6 +42,21 @@ export interface DataSourceContext {
   `Dataset`.
 - **`dispose`** is optional cleanup — `QSpec.dispose()` calls it, for example to close a
   connection pool. A source with nothing to release is not obligated to implement it.
+- **`context.metadata`** is the caller's `ExecutionContext.metadata`: per-execution host context
+  such as a transaction, a tenant or a viewer, so a source needs no `AsyncLocalStorage` side
+  channel to receive it. Core accepts only a plain object there (anything else rejects the
+  execution with `ExecutionContextError`, `QSPEC_EXECUTION_CONTEXT_INVALID`, before parameters are
+  validated), makes **one** shallow copy per execution into a null-prototype object (read keys
+  with `Object.hasOwn`, not `metadata.hasOwnProperty`), freezes it, and hands that same frozen
+  object to every execution policy and then to the source, so a policy cannot add, remove or
+  replace a key the source reads. Values are not cloned or frozen: a transaction handle stays the
+  host's live object. The key is absent from the context when the caller passed no metadata.
+  Rejecting a non-plain-object `metadata` is a 0.2.0 behaviour change: 0.1.0 ignored the field
+  entirely, so a host that passed a class instance must now wrap it (`metadata: { scope: instance
+}`).
+  **Never log it**, and never copy it into an error message: core itself never puts metadata, or
+  any of its keys, in a log line, an event, an error or `ExecutionMetadata`
+  ([Security §72.6](security.md#726-no-credential-logging)).
 - **`supportedLanguages`** is covered next.
 
 ## `supportedLanguages`

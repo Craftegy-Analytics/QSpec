@@ -141,7 +141,20 @@ there is no window in which the checked query and the executed query can differ.
 **Consequences.** Policy time is not covered by `limits.queryTimeoutMs`, which scopes the source
 call only. Policies receive the caller's `signal`; core checks it before each policy and once
 after the last one, so a cancellation during a policy surfaces as `QSpecAbortError` even if the
-policy allowed.
+policy allowed. (Amended in review: core also races each pending `check` against the signal, so a
+policy that never settles cannot hold an aborted execution; a late result is ignored.)
+
+Parameter validation (stage 3) runs **before** the policy step. A caller whose parameters fail
+stage 3 gets `ParameterValidationError`, which `@qspecs/http` answers with a 400 whose issues can
+describe a parameter's declared constraints (an enum's allowed values, for instance), and no
+`policy:decision` event fires. Policies therefore decide whether an execution of validated
+parameters may run; they are not resource-level authorization. Deciding whether a caller may use
+a resource at all belongs in front of QSpec (around `createQSpecHandler`, or before `execute()`),
+or in a pre-validation phase this design reserves but does not build (section 9).
+
+`PreparedResource.execute()` awaits the runtime's `ready()` before it reads the policy list
+(added in review): a prepared resource outlives the moment it was prepared, so a policy plugin
+queued later, or one whose `setup()` failed, must still guard it.
 
 ### 3.3 `prepare()` does not run policies (SPEC.md §58, §81)
 
@@ -255,7 +268,8 @@ parameter declared without `required`.
 | returns `{ outcome: "deny", issues }`, at least one issue  | `ExecutionDeniedError` with those issues                                         | `deny`                    |
 | returns `{ outcome: "deny", issues: [] }`                  | `ExecutionDeniedError` with one core issue (`QSPEC_EXECUTION_DENIED`, path `[]`) | `deny`                    |
 | throws `ExecutionDeniedError`                              | rebuilt by core with the **registered** policy name and the thrown issues        | `deny`                    |
-| throws while the signal is aborted, or an abort-like error | `QSpecAbortError`                                                                | `error`                   |
+| throws while the signal is aborted, or the signal aborts while `check` is pending | `QSpecAbortError`                                         | `error`                   |
+| throws an abort-like error (`AbortError`, `TimeoutError`, `QSpecAbortError`) while the signal is live (amended in review) | `ExecutionPolicyError`: the policy's own failure | `error`                   |
 | throws anything else, including another `QSpecError`       | `ExecutionPolicyError` (`QSPEC_POLICY_FAILED`) with the throw as `cause`         | `error`                   |
 | returns anything else (`undefined`, an unknown outcome)    | `ExecutionPolicyError`                                                           | `error`                   |
 
@@ -312,9 +326,10 @@ taking a significant share of execution time.
 - `ExecutionContext.metadata` must be `undefined` or a plain object (`isPlainObject`). Anything
   else rejects the execution with `ExecutionContextError` (`QSPEC_EXECUTION_CONTEXT_INVALID`)
   before stage 3, so a string or an array is never spread into a surprising record.
-- Core makes one shallow copy (`Object.freeze({ ...metadata })`) per execution and hands **the same
-  frozen object** to every policy and to `DataSourceContext.metadata`. A policy cannot add, remove
-  or replace a key the source will read.
+- Core makes one shallow copy per execution (into a null-prototype object, as amended in review,
+  rejecting with `ExecutionContextError` and a fixed message an object whose getters throw) and
+  hands **the same frozen object** to every policy and to `DataSourceContext.metadata`. A policy
+  cannot add, remove or replace a key the source will read.
 - Values are not cloned or frozen. A transaction handle must stay a live object; the host owns
   what it puts there.
 - Core never logs metadata, never puts it (or its keys) in an event, an error, or
@@ -617,6 +632,7 @@ policy advances the sequence.
 | Deferred                                                     | Reopen when                                                                                         |
 | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
 | A prepare-time policy phase (3.3 B)                          | a host shows that a pure admission check exported by its policy package cannot serve its admission |
+| A pre-validation policy phase (before stage 3; see 3.2)      | a host needs a policy to refuse a caller before parameter issues reach that caller, and authorizing in front of QSpec cannot serve it |
 | Verdict caching in core (3.9)                                | `policy:decision.durationMs` shows uncacheable policy cost as a significant share of execution time |
 | Metadata on `TransformContext`                               | a transform needs per-execution host context                                                        |
 | A `policyTimeoutMs` limit                                    | a policy is observed to hang an execution despite the caller's signal                               |

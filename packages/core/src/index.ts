@@ -31,6 +31,11 @@ export type {
   ParameterValidation,
 } from "./types/parameters.js";
 export type { Binding, QueryDefinition } from "./types/query.js";
+// `describeBinding` is public under the same SPEC.md §104 rule as `suggest` below: an execution
+// policy's admission check (run when a host stores a manifest, outside any runtime) must relate a
+// statement's parameters to the manifest's bindings by design §2.1's rule, and a hand-copied
+// second version of that rule would drift from the one core builds `PolicyQuery.bindings` with.
+export { describeBinding } from "./internal/bindings.js";
 // The expression subsystem is public because plugins outside this package need
 // it: @qspecs/transforms' `filter` and `derive` both compile and evaluate
 // expressions, and cannot reach src/internal/. `maxDepth` is a required option
@@ -103,3 +108,10 @@ export type {
   Transform,
   TransformContext,
 } from "./types/plugin.js";
+export type {
+  ExecutionPolicy,
+  ExecutionPolicyDecision,
+  ExecutionPolicyInput,
+  PolicyBinding,
+  PolicyQuery,
+} from "./types/policy.js";

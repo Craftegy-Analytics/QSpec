@@ -1,8 +1,8 @@
 # Plugin Authoring
 
-This document walks through writing two new capabilities from scratch — a transform and a data
-source — using the same interfaces `@qspecs/transforms`, `@qspecs/postgres`, and `@qspecs/testing`'s
-`memory()` implement. [Plugins](plugins.md) covers the plugin shape and the registries in general;
+This document walks through writing two new capabilities from scratch, a transform and a data
+source, plus a shorter section on execution policies, using the same interfaces
+`@qspecs/transforms`, `@qspecs/postgres`, and `@qspecs/testing`'s `memory()` implement. [Plugins](plugins.md) covers the plugin shape and the registries in general;
 this document is the "how do I actually write one" companion, with the contract suites shipped in
 `@qspecs/testing` as the acceptance bar for each. Nothing here requires understanding any QSpec
 internal module — every type used below is exported from `@qspecs/core`'s public entry point
@@ -259,9 +259,99 @@ depth as a transform or a data source — [Presentations](presentations.md) cove
 `@qspecs/charts`' two `PresentationType` implementations follow — but the same "contract suite is
 the acceptance bar" principle applies there too.
 
+## Writing an execution policy
+
+An `ExecutionPolicy` has one method, `check(input)`, returning a decision or a promise of one. It
+runs after the query is compiled and before the data source, sees no caller-supplied value, and is
+installed like any other capability ([Plugins](plugins.md#execution-policies) has the full input,
+order and fail-closed rules). A policy written against SQL narrows the language's view and denies
+anything it cannot read:
+
+```ts
+import { definePlugin, type ExecutionPolicy } from "@qspecs/core";
+import { isSqlPolicyView } from "@qspecs/sql";
+
+const selectOnly: ExecutionPolicy = {
+  check({ query }) {
+    if (query === undefined) return { outcome: "allow" };
+    if (query.language !== "sql" || !isSqlPolicyView(query.view)) {
+      return {
+        outcome: "deny",
+        issues: [{ code: "language", message: "Only SQL is allowed.", path: ["spec", "query"] }],
+      };
+    }
+    const text = query.view.segments.join(" ").trimStart();
+    return /^select\b/i.test(text)
+      ? { outcome: "allow" }
+      : {
+          outcome: "deny",
+          issues: [
+            {
+              code: "shape.select-only",
+              message: "Only SELECT statements may run.",
+              path: ["spec", "query", "statement"],
+            },
+          ],
+        };
+  },
+};
+
+export const governance = definePlugin({
+  name: "my-governance",
+  setup(api) {
+    api.policies.register("select-only", selectOnly);
+  },
+});
+```
+
+(A prefix test is a toy: a real statement guard parses the statement. The shape is what matters:
+narrow the view with the language's guard, deny with stable issue `code`s and absolute manifest
+paths, and never put a metadata value or a bound value into an issue.) Four rules:
+
+- **Fail closed.** Return `deny` for anything you do not recognize. A throw or a malformed decision
+  becomes `ExecutionPolicyError` (`QSPEC_POLICY_FAILED`), never an allow, but a deliberate denial
+  with a stable code is what an operator can act on.
+- **Be deterministic.** The same execution must produce the same issue codes, so audit and
+  admission tooling can key on them.
+- **Honor the signal.** `input.signal` is the caller's; a check that waits on something slow must
+  settle promptly once it is aborted. Core stops waiting for a pending check the moment the signal
+  aborts and ignores its late result, but the work it started keeps running unless the policy
+  cancels it. Policy time is not covered by `limits.queryTimeoutMs`. A timeout or abort from the
+  policy's own backend, while the caller's signal is live, is reported as the policy's failure
+  (`QSPEC_POLICY_FAILED`), not as a client abort.
+- **Cache only what is pure.** Core caches no verdict. A policy whose expensive step is a pure
+  function of the statement text (parsing it) may cache that by text; a verdict that depends on
+  configuration or metadata must be computed per execution.
+
+For an admission check that runs when a host stores a manifest (`prepare()` never runs policies),
+export a pure function from the policy package that applies the same rules to
+`sqlPolicyView(spec.query)` and `describeBinding` over `spec.query.bindings`: both give exactly what
+the running policy will see.
+
+### Acceptance bar: `runExecutionPolicyContractTests`
+
+`@qspecs/testing`'s `runExecutionPolicyContractTests`
+(`packages/testing/src/contracts/execution-policy.ts`) runs a policy through a real runtime. The
+fixture supplies `create()` (a fresh policy per test), `plugins()` (whatever the cases need, for
+example `sql()` and `memory()`, fresh per test), `sourceCalls()` (how many times the data source
+ran), an `allowed` case and a `denied` case (`manifest`, optional `parameters` and `metadata`), and
+an optional `abortBoundMs` (default 150 ms). The suite asserts that the allowed case reaches the
+source exactly once and returns data; that the denied case rejects with `ExecutionDeniedError`
+naming the registered policy, with at least one issue whose `code` and `message` are strings and
+whose `path` is an array; that the denied case never reaches the source; that a second run of the
+denied case reports the same issue codes; that a metadata sentinel never appears in what the denial
+reports (sentinels go under an unread key and under every key the fixture's optional `metadataKeys`
+names: list the metadata keys your policy reads whose value may be any string in the denied case,
+such as a tenant or viewer id, or an echo of the value it actually reads goes unnoticed); and that a
+check started with an already-aborted signal settles within `abortBoundMs`. Its own test file proves
+each assertion can fail by planting one defect at a time (a policy that always allows, numeric issue
+codes, metadata echoed into a message, a read metadata key's value echoed into a message, codes that
+depend on a counter, and a check that ignores an aborted signal).
+
 ## See also
 
-- [`docs/plugins.md`](plugins.md) — the plugin shape, the seven registries, and install/load order.
+- [`docs/plugins.md`](plugins.md): the plugin shape, the eight registries, install/load order,
+  and how execution policies are evaluated.
 - [`docs/transforms.md`](transforms.md) — the six built-in transforms in full depth, the expression
   AST, and the `describe()`/`validate()` contracts this document's `uppercase` example follows.
 - [`docs/data-sources.md`](data-sources.md) — the `DataSource` interface, `supportedLanguages`, the

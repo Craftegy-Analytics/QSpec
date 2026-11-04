@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ManifestValidationError,
   QSpecAbortError,
+  QSpecError,
   QueryExecutionError,
   createQSpec,
   definePlugin,
@@ -276,6 +277,38 @@ describe("createHttpExecutor", () => {
     expect(nameIssue.code).toBe("QSPEC_MANIFEST_INVALID");
     expect(nameIssue.path).toEqual(["metadata", "name"]);
     expect(nameIssue.suggestion).toBe("not-a-valid-name");
+  });
+
+  it("reconstructs a 403 denial as a base QSpecError carrying QSPEC_EXECUTION_DENIED", async () => {
+    const plugin = memory({ tables: { analytics: { columns: ["id"], rows: [[1]] } } });
+    const runtime = createQSpec()
+      .use(plugin)
+      .use(
+        definePlugin({
+          name: "test/deny-all",
+          setup(api) {
+            api.policies.register("deny-all", {
+              check: () => ({
+                outcome: "deny",
+                issues: [{ code: "nope", message: "Relation hidden_ledger is refused.", path: [] }],
+              }),
+            });
+          },
+        }),
+      );
+    const handler = createQSpecHandler({ runtime, manifests: { orders: ORDERS_MANIFEST } });
+    const executor = createHttpExecutor({ url: URL_UNDER_TEST, fetch: fetchFromHandler(handler) });
+
+    const error = await captureRejection(executor.execute("orders"));
+    if (!(error instanceof QSpecError)) {
+      throw new Error(`expected a QSpecError, got ${String(error)}`);
+    }
+    // No dedicated class crosses the wire: the issues stayed on the server.
+    expect(error.constructor).toBe(QSpecError);
+    expect(error.code).toBe("QSPEC_EXECUTION_DENIED");
+    expect(error.message).toBe("The request was refused by an execution policy.");
+    expect(error.message).not.toContain("hidden_ledger");
+    expect(plugin.calls).toHaveLength(0);
   });
 
   it("reconstructs a 500 as a QueryExecutionError whose message is the server's safe text", async () => {

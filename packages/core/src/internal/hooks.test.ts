@@ -10,6 +10,22 @@ describe("createHooks", () => {
     expect(handler).toHaveBeenCalledWith({ kind: "Chart", name: "x" });
   });
 
+  it("delivers a policy:decision payload to a subscriber", () => {
+    const hooks = createHooks();
+    const handler = vi.fn();
+    hooks.on("policy:decision", handler);
+    const payload = {
+      executionId: "e1",
+      resource: "orders",
+      policy: "guard",
+      outcome: "deny",
+      codes: ["shape.select-only"],
+      durationMs: 1.5,
+    } as const;
+    hooks.emit("policy:decision", payload);
+    expect(handler).toHaveBeenCalledWith(payload);
+  });
+
   it("supports multiple subscribers in registration order", () => {
     const hooks = createHooks();
     const calls: number[] = [];

@@ -64,3 +64,53 @@ describe("createRegistry", () => {
     expect(registry.list()).toEqual(["constructor"]);
   });
 });
+
+describe("createRegistry entries()", () => {
+  it("yields registration order, while list() stays alphabetical", () => {
+    const registry = createRegistry<number>("execution policy");
+    registry.register("b", 1);
+    registry.register("a", 2);
+    registry.register("c", 3);
+    expect(registry.entries().map((entry) => entry.name)).toEqual(["b", "a", "c"]);
+    expect(registry.list()).toEqual(["a", "b", "c"]);
+  });
+
+  it("replace() on an existing name keeps its position and swaps the implementation", () => {
+    const registry = createRegistry<number>("execution policy");
+    registry.register("b", 1);
+    registry.register("a", 2);
+    registry.register("c", 3);
+    registry.replace("a", 20);
+    expect(registry.entries()).toEqual([
+      { name: "b", implementation: 1 },
+      { name: "a", implementation: 20 },
+      { name: "c", implementation: 3 },
+    ]);
+  });
+
+  it("replace() on a new name appends it last", () => {
+    const registry = createRegistry<number>("execution policy");
+    registry.register("b", 1);
+    registry.register("a", 2);
+    registry.replace("d", 4);
+    expect(registry.entries().map((entry) => entry.name)).toEqual(["b", "a", "d"]);
+  });
+
+  it("returns a snapshot: a later registration does not change an earlier result", () => {
+    const registry = createRegistry<number>("execution policy");
+    registry.register("a", 1);
+    const before = registry.entries();
+    registry.register("b", 2);
+    expect(before.map((entry) => entry.name)).toEqual(["a"]);
+    expect(Object.isFrozen(before)).toBe(true);
+  });
+
+  it("names the execution policy registry in a duplicate error", () => {
+    const registry = createRegistry<number>("execution policy");
+    registry.register("guard", 1);
+    expect(() => registry.register("guard", 2)).toThrow(PluginRegistrationError);
+    expect(() => registry.register("guard", 2)).toThrow(
+      /An execution policy named "guard" is already registered/,
+    );
+  });
+});
