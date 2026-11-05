@@ -39,6 +39,13 @@ export interface ExecutionContext {
   readonly signal?: AbortSignal;
   readonly locale?: string;
   readonly timezone?: string;
+  /**
+   * Per-execution host context (a transaction, a tenant, a viewer). Must be a plain object or
+   * omitted; anything else rejects the execution with `ExecutionContextError`. Core makes one
+   * frozen, null-prototype shallow copy and hands that same object to every execution policy
+   * and to `DataSourceContext.metadata`; values are not cloned. Core never logs it or puts it in an
+   * event, an error or `ExecutionMetadata`. (SPEC.md §59, §72.6)
+   */
   readonly metadata?: Record<string, unknown>;
 }
 

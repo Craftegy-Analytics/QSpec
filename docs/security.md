@@ -145,6 +145,32 @@ adapter's raw thrown message into `QueryExecutionError.message` when the adapter
 QSpecError — every non-validation failure becomes a fixed, generic 500 message instead of
 forwarding whatever the driver said.
 
+**Execution policies never see a caller-supplied value.** An `ExecutionPolicy` (SPEC.md §110; see
+[Plugins](plugins.md#execution-policies)) receives the compiled query only through its language's
+`policyView`, which by contract contains no bound value (for SQL, `CompiledSqlQuery` without
+`values`), deep-frozen by core; each binding only as what it reads (`{ kind: "parameter",
+parameter }` or `{ kind: "literal" }`, the literal's value omitted); and the manifest, which holds
+only what its author declared (binding literals and parameter defaults are readable there). Never
+parameter values, resolved bindings, the compiled object itself, or connection details. Issues a
+policy reports are rebuilt field by field, so nothing else it attaches to them reaches the error or
+the `policy:decision` event. `packages/core/src/internal/policy.test.ts` proves it with sentinel
+parameter and literal values that appear nowhere in what a policy receives, and was falsified by
+making the test language's view leak its bindings. The `policy:decision` event carries policy
+names, outcomes, issue codes and timing only, and `ExecutionDeniedError`'s message names the
+policy and the issue count, never an issue message.
+
+**`ExecutionContext.metadata` is never logged.** Metadata is per-execution host context (a
+transaction, a tenant, a viewer). Core accepts it only as a plain object, makes one frozen,
+null-prototype shallow copy, and hands that same object to every policy and to
+`DataSourceContext.metadata`; it never puts metadata, or any of its keys, in a log line, a lifecycle
+event, an error message or `ExecutionMetadata`. An object whose getters throw while it is copied is
+rejected with `ExecutionContextError` and a fixed message, keeping nothing the host's object threw.
+`packages/core/src/internal/execute.test.ts` proves the never-logged rule with sentinel keys and
+values against a spy logger and a handler on every event. Data source and policy authors are asked
+to hold the same line ([Data Sources](data-sources.md#the-interface),
+[Plugins](plugins.md#execution-policies)); `runExecutionPolicyContractTests` checks that a policy's
+denial never echoes a metadata value.
+
 ## Why the HTTP boundary carries a resource name, not a query
 
 `QSpecExecuteRequest` (`packages/http/src/internal/protocol.ts`) has exactly two fields:
@@ -178,6 +204,28 @@ rendered DOM for the statement text, the table name, and the credentials — non
 appear, because none of them are reachable from what the browser is capable of sending. See
 [`docs/architecture.md` §10.1](architecture.md#101-why-the-http-boundary-carries-a-resource-name-not-a-query)
 for the complete account.
+
+**A policy denial crosses as a 403 with no issues.** `createQSpecHandler`'s `mapError` answers
+`ExecutionDeniedError` with status 403 and exactly `{ code: "QSPEC_EXECUTION_DENIED", message: "The
+request was refused by an execution policy." }`. A validation error's issues are forwarded with
+its 400 because they describe the manifest's own declarations and the caller's own input; a
+policy's issue messages describe the statement (relations, columns), which this boundary keeps on
+the server as it keeps the statement. The full issues stay on the thrown error, for the host that
+catches it server-side. A policy that fails (`ExecutionPolicyError`, `QSPEC_POLICY_FAILED`) or an
+execution context core rejects (`ExecutionContextError`, `QSPEC_EXECUTION_CONTEXT_INVALID`) is the
+same generic 500 as any other internal failure: the code crosses, the message is fixed.
+`test/react-pipeline.test.tsx` extends its leak assertion to a denied request.
+
+**Parameter validation runs before policies, so it is not an authorization boundary.** Stage 3
+validates a request's parameters before any execution policy runs. An unauthorized caller who
+sends a bad parameter (an unknown enum value, say) therefore gets a 400 whose issues describe that
+parameter's declared constraints, including an enum's allowed values, and no `policy:decision`
+event fires for it. That is information about the manifest's declared inputs, not about the
+statement, but it is not gated by any policy. A host that must not disclose a resource's
+parameter contract to an unauthorized caller authorizes the request before it reaches
+`createQSpecHandler` (the handler has no auth of its own; see below), or before `execute()`. A
+pre-validation policy phase is a deferred design option, recorded in
+[`docs/known-gaps.md`](known-gaps.md).
 
 ## The HTTP handler has no auth of its own
 

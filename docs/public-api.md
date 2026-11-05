@@ -14,18 +14,36 @@ versus `src/internal/`. Anything reachable by importing the package's name — `
 from "@qspecs/core"` — is public API; anything under `internal/` is not, and nothing outside that
 package's own source is meant to reach it. `@qspecs/core`'s own public surface is deliberately
 narrow by this rule: it exports the manifest and plugin types, `createQSpec`, its full error-class
-hierarchy (`QSpecError` and its fourteen subclasses, from `ManifestValidationError` through
-`LimitExceededError` — `packages/core/src/errors.ts`), `definePlugin`/`defineManifest`/`parseManifest`, the expression subsystem
+hierarchy (`QSpecError` and its seventeen subclasses, from `ManifestValidationError` through
+`ExecutionContextError`, in `packages/core/src/errors.ts`), `definePlugin`/`defineManifest`/`parseManifest`, the expression subsystem
 (`evaluateExpression`, `normalizeExpression` — needed outside core because `@qspecs/transforms`'
 `filter` and `derive` compile through it), `suggest` (needed by `@qspecs/sql`'s own "did you mean"
 diagnostics), and `isPlainObject`/`isUnsafeKey` (needed by `@qspecs/http`'s wire-protocol parser to
 apply the identical prototype-pollution checks core's own manifest parsing uses — see
-[Security §72.4](security.md#724-prototype-pollution-resistance)). Each of those three
-exceptions — the expression subsystem, `suggest`, and `isPlainObject`/`isUnsafeKey` — exists
-because a real second package needed the exact same logic core already has, and a hand-copied
-second implementation would be a second place for the two to drift: the SPEC.md §104 rule "if
-multiple packages need an abstraction, promote it intentionally into a documented public or
-internal shared contract," applied literally, three separate times.
+[Security §72.4](security.md#724-prototype-pollution-resistance)), and `describeBinding` (needed
+by an execution policy's admission check, which runs outside any runtime and must read bindings by
+the same rule core does). Each of those four exceptions (the expression subsystem, `suggest`,
+`isPlainObject`/`isUnsafeKey`, and `describeBinding`) exists because a real second consumer needed
+the exact same logic core already has, and a hand-copied second implementation would be a second
+place for the two to drift: the SPEC.md §104 rule "if multiple packages need an abstraction,
+promote it intentionally into a documented public or internal shared contract," applied literally,
+four separate times. `describeBinding` also closed a duplicate inside core itself: the binding
+pattern used to live in two internal files, and now `prepare()`, `qspec validate` and the policy
+input all classify through it.
+
+### Added for execution policies (0.2.0)
+
+| Export                                                                                               | Package        | Why it is public                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ExecutionPolicy`, `ExecutionPolicyInput`, `ExecutionPolicyDecision`, `PolicyQuery`, `PolicyBinding` | `@qspecs/core` | The contract a policy plugin implements, and `QSpecPluginAPI.policies`, the eighth registry, is typed with it.                                                                                       |
+| `ExecutionDeniedError`, `ExecutionPolicyError`, `ExecutionContextError`                              | `@qspecs/core` | Hosts catch them: `QSPEC_EXECUTION_DENIED`, `QSPEC_POLICY_FAILED`, `QSPEC_EXECUTION_CONTEXT_INVALID`.                                                                                                |
+| `describeBinding`                                                                                    | `@qspecs/core` | Design §2.1's binding rule, the one core uses; a policy's admission check needs it outside a runtime (SPEC.md §104).                                                                                 |
+| `QueryLanguage.policyView`, `DataSourceContext.metadata`                                             | `@qspecs/core` | Optional members on existing interfaces: a language's value-free view for policies, and the frozen metadata a source receives.                                                                       |
+| `SqlPolicyView`, `isSqlPolicyView`, `sqlPolicyView`                                                  | `@qspecs/sql`  | A policy narrows `PolicyQuery.view` (`unknown` in core) with the guard and fails closed on anything else; `sqlPolicyView` gives an admission check the same view statically.                         |
+| `scanSql`, `ScanResult`                                                                              | `@qspecs/sql`  | Tooling outside the package needs exactly this scan; a regular-expression copy misses escape strings, dollar quotes and nested comments (SPEC.md §104's second-consumer rule: promote, do not copy). |
+
+`runExecutionPolicyContractTests` is exported from `@qspecs/testing`, which stays private and
+unpublished like the other contract suites.
 
 ## The structural half: package boundaries
 

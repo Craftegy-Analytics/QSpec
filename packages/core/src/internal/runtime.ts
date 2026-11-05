@@ -1,5 +1,6 @@
 import { PluginRegistrationError, QSpecError } from "../errors.js";
 import type { HookRegistry, QSpecLogger } from "../types/events.js";
+import type { ExecutionPolicy } from "../types/policy.js";
 import type { PresentationType } from "../types/presentation.js";
 import type { Registry } from "../types/registry.js";
 import type {
@@ -22,6 +23,7 @@ import {
   type QSpecResult,
 } from "../types/runtime.js";
 import { createHooks } from "./hooks.js";
+import type { PolicyEntry } from "./policy.js";
 import { createRegistry } from "./registry.js";
 import { prepareResource } from "./prepare.js";
 
@@ -35,7 +37,16 @@ export interface RuntimeInternals {
     readonly resources: Registry<ResourceKind>;
     readonly presentations: Registry<PresentationType>;
     readonly renderers: Registry<Renderer>;
+    readonly policies: Registry<ExecutionPolicy>;
   };
+  /** Registered execution policies in registration order: the order they are evaluated in. */
+  readonly policies: { entries(): readonly PolicyEntry[] };
+  /**
+   * `QSpec.ready()`: throws a stored setup failure, otherwise awaits every queued or running
+   * plugin setup. execute() calls it before it reads `policies`, so a resource prepared before a
+   * policy plugin was installed (or before one failed its setup) never runs unguarded.
+   */
+  readonly ready: () => Promise<void>;
   readonly hooks: HookRegistry;
   readonly limits: QSpecLimits;
   readonly logger: QSpecLogger;
@@ -56,13 +67,30 @@ export function createQSpec(options: QSpecOptions = {}): QSpec {
     resources: createRegistry<ResourceKind>("resource kind"),
     presentations: createRegistry<PresentationType>("presentation type"),
     renderers: createRegistry<Renderer>("renderer"),
+    policies: createRegistry<ExecutionPolicy>("execution policy"),
   };
 
   // The one kind core owns: a resource with no presentation. Chart, Table,
   // Metric and Dashboard are supplied by downstream packages. (SPEC.md §24)
   registries.resources.register("Dataset", { requiresPresentation: false });
 
-  const internals: RuntimeInternals = { registries, hooks, limits, logger };
+  const policies = {
+    entries: (): readonly PolicyEntry[] =>
+      registries.policies.entries().map(({ name, implementation }) => ({
+        name,
+        policy: implementation,
+      })),
+  };
+
+  const internals: RuntimeInternals = {
+    registries,
+    policies,
+    hooks,
+    limits,
+    logger,
+    // Late-bound: `qspec` is declared below, and this runs only once an execution starts.
+    ready: () => qspec.ready(),
+  };
 
   const pluginApi: QSpecPluginAPI = {
     queryLanguages: registries.queryLanguages,
@@ -72,6 +100,7 @@ export function createQSpec(options: QSpecOptions = {}): QSpec {
     resources: registries.resources,
     presentations: registries.presentations,
     renderers: registries.renderers,
+    policies: registries.policies,
     hooks: { on: hooks.on },
     logger,
     limits,

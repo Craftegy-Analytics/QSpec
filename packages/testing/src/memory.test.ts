@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { QSpecAbortError, createQSpec, type DataSourceContext } from "@qspecs/core";
+import { QSpecAbortError, createQSpec, definePlugin, type DataSourceContext } from "@qspecs/core";
 import { memory } from "./memory.js";
 
 const manifest = {
@@ -45,6 +45,31 @@ describe("memory", () => {
     expect(result.data.fields.map((f) => f.name)).toEqual(["month", "revenue"]);
     expect(result.data.rows).toHaveLength(2);
     expect(result.data.rows[0]?.["revenue"]).toBe(10);
+  });
+
+  it("gives execution policies a view of the compiled query without its bindings", async () => {
+    const { plugin } = build();
+    const views: unknown[] = [];
+    const qspec = createQSpec()
+      .use(plugin)
+      .use(
+        definePlugin({
+          name: "capture-view",
+          setup(api) {
+            api.policies.register("capture", {
+              check(input) {
+                views.push(input.query?.view);
+                return { outcome: "allow" };
+              },
+            });
+          },
+        }),
+      );
+    await qspec.execute(manifest, { parameters: { from: "2026-01-01" } });
+    expect(views).toEqual([{ source: "analytics", statement: "analytics" }]);
+    expect(JSON.stringify(views)).not.toContain("2026-01-01");
+    // The source still receives the bindings.
+    expect(plugin.calls[0]?.bindings).toEqual({ from: "2026-01-01" });
   });
 
   it("records each call with the compiled statement and resolved bindings", async () => {

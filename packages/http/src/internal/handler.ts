@@ -1,4 +1,5 @@
 import {
+  ExecutionDeniedError,
   ManifestValidationError,
   ParameterValidationError,
   QSpecAbortError,
@@ -93,10 +94,23 @@ function resolveManifest(
  * a QSpecError. Only `error.code` is trusted from an arbitrary QSpecError;
  * the code is a fixed, known-safe string this package never composes from
  * caller or driver input, unlike the message. (SPEC.md §72.6)
+ *
+ * `ExecutionDeniedError` (an execution policy refused the request) is `403`
+ * with a fixed message and no `issues`: a policy's issue messages name
+ * relations and columns from the statement, which the server keeps to itself
+ * exactly as it keeps the statement (architecture §10.1). A policy that fails
+ * (`ExecutionPolicyError`) and an execution context core rejects
+ * (`ExecutionContextError`) fall into the generic 500 below.
  */
 function mapError(error: unknown): Response {
   if (error instanceof ManifestValidationError || error instanceof ParameterValidationError) {
     return errorResponse(400, { code: error.code, message: error.message, issues: error.issues });
+  }
+  if (error instanceof ExecutionDeniedError) {
+    return errorResponse(403, {
+      code: error.code,
+      message: "The request was refused by an execution policy.",
+    });
   }
   if (error instanceof QSpecAbortError) {
     return errorResponse(499, { code: error.code, message: "The request was aborted." });

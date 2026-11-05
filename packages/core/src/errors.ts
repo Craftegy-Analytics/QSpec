@@ -177,3 +177,49 @@ export class LimitExceededError extends QSpecError {
     this.name = "LimitExceededError";
   }
 }
+
+interface DeniedErrorOptions extends IssueErrorOptions {
+  readonly policy: string;
+}
+
+/**
+ * A policy denied the execution; the data source was not called. (SPEC.md §110)
+ *
+ * The message names the policy and the issue count only, never an issue message: issue messages
+ * may name relations and columns from the statement, so they stay on `issues` for the host that
+ * catches the error.
+ */
+export class ExecutionDeniedError extends AggregateQSpecError {
+  readonly policy: string;
+
+  constructor(options: DeniedErrorOptions) {
+    const count = options.issues.length;
+    super(
+      `Execution policy "${options.policy}" denied the execution ` +
+        `(${count} problem${count === 1 ? "" : "s"}).`,
+      "QSPEC_EXECUTION_DENIED",
+      options,
+    );
+    this.name = "ExecutionDeniedError";
+    this.policy = options.policy;
+  }
+}
+
+/** A policy threw or returned something that is not a decision. Fails closed. */
+export class ExecutionPolicyError extends QSpecError {
+  readonly policy: string;
+
+  constructor(message: string, options: { readonly policy: string; readonly cause?: unknown }) {
+    super(message, { code: "QSPEC_POLICY_FAILED", cause: options.cause });
+    this.name = "ExecutionPolicyError";
+    this.policy = options.policy;
+  }
+}
+
+/** `ExecutionContext` holds a value core cannot accept, for example a non-object `metadata`. */
+export class ExecutionContextError extends QSpecError {
+  constructor(message: string, path: readonly PathSegment[]) {
+    super(message, { code: "QSPEC_EXECUTION_CONTEXT_INVALID", path });
+    this.name = "ExecutionContextError";
+  }
+}

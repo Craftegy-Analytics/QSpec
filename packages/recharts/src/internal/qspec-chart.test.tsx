@@ -68,6 +68,7 @@ async function registeredPresentationTypes(): Promise<readonly string[]> {
     resources: fakeRegistry(),
     presentations,
     renderers: fakeRegistry(),
+    policies: fakeRegistry(),
     hooks: { on: () => () => {} },
     logger: {},
     limits: DEFAULT_LIMITS,

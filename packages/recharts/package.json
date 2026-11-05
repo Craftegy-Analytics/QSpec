@@ -1,6 +1,6 @@
 {
   "name": "@qspecs/recharts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Recharts renderers for QSpec chart presentations",
   "type": "module",
   "license": "MIT",
@@ -31,14 +31,14 @@
     "./package.json": "./package.json"
   },
   "peerDependencies": {
-    "@qspecs/core": "0.1.0",
-    "@qspecs/charts": "0.1.0",
+    "@qspecs/core": "0.2.0",
+    "@qspecs/charts": "0.2.0",
     "react": ">=19",
     "recharts": "^3.0.0"
   },
   "devDependencies": {
-    "@qspecs/core": "0.1.0",
-    "@qspecs/charts": "0.1.0",
+    "@qspecs/core": "0.2.0",
+    "@qspecs/charts": "0.2.0",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

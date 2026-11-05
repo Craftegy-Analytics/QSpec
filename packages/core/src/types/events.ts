@@ -42,6 +42,17 @@ export interface QSpecEventMap {
     readonly durationMs: number;
     readonly rowCount: number;
   };
+  /**
+   * One per execution policy evaluated, in registration order. Carries codes and timing only:
+   * never an issue message, the policy view, a binding, or metadata. (policy design 3.8)
+   */
+  "policy:decision": ExecutionEventBase & {
+    readonly policy: string;
+    readonly outcome: "allow" | "deny" | "error";
+    /** Issue codes for a denial; the error's code for "error"; empty for "allow". */
+    readonly codes: readonly string[];
+    readonly durationMs: number;
+  };
   "execution:complete": ExecutionEventBase & {
     readonly durationMs: number;
     readonly rowCount: number;

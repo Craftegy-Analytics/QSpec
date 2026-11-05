@@ -2,10 +2,11 @@
 
 `@qspecs/core` registers exactly one capability itself — the `Dataset` resource kind
 (`packages/core/src/internal/runtime.ts`) — and nothing else. Every query language, data source,
-transform, semantic type, additional resource kind, presentation type, and renderer reaches a
-`QSpec` runtime through a **plugin** (SPEC.md §6, §50). This document covers the plugin shape, the
-`QSpecPluginAPI` a plugin's `setup()` receives, the seven capability registries, and the order in
-which plugins are installed and can observe or override one another.
+transform, semantic type, additional resource kind, presentation type, renderer, and execution
+policy reaches a `QSpec` runtime through a **plugin** (SPEC.md §6, §50). This document covers the
+plugin shape, the `QSpecPluginAPI` a plugin's `setup()` receives, the eight capability registries,
+the order in which plugins are installed and can observe or override one another, and how
+execution policies are evaluated.
 
 ```ts
 import { definePlugin } from "@qspecs/core";
@@ -59,7 +60,7 @@ package's own `peerDependencies` instead (see [Specification Versioning](specifi
 for what this repository's packages actually declare there); `QSpecPlugin.version` is not that
 mechanism and today has no effect on `use()`, `ready()`, or capability resolution.
 
-## `setup(api)` and the seven registries
+## `setup(api)` and the eight registries
 
 `setup` receives a `QSpecPluginAPI` (`packages/core/src/types/plugin.ts`) — one `Registry<T>` per
 capability, plus three cross-cutting handles:
@@ -73,16 +74,20 @@ export interface QSpecPluginAPI {
   readonly resources: Registry<ResourceKind>;
   readonly presentations: Registry<PresentationType>;
   readonly renderers: Registry<Renderer>;
+  readonly policies: Registry<ExecutionPolicy>;
   readonly hooks: { readonly on: HookRegistry["on"] };
   readonly logger: QSpecLogger;
   readonly limits: Readonly<QSpecLimits>;
 }
 ```
 
-Every one of QSpec's registry-driven capabilities (SPEC.md §6) is one of these seven registries —
+Every one of QSpec's registry-driven capabilities (SPEC.md §6) is one of these eight registries:
 adding a new query language, data source, transform, semantic type, resource kind, presentation
-type, or renderer never requires a change to `@qspecs/core` itself, only a plugin that registers
-into the matching one. `hooks` exposes only `.on` — plugins observe the runtime's lifecycle events
+type, renderer, or execution policy never requires a change to `@qspecs/core` itself, only a
+plugin that registers into the matching one. `policies` is the eighth, added in 0.2.0: see
+[Execution policies](#execution-policies) below.
+
+`hooks` exposes only `.on`: plugins observe the runtime's lifecycle events
 (`manifest:parse:start`, `validation:end`, and the rest — SPEC.md §68), they never emit one
 themselves (design §2.9, cited in [`docs/architecture.md` §4](architecture.md#4-resolved-design-decisions)).
 `logger` is the runtime's own configured `QSpecLogger` (SPEC.md §85) — the same object a data
@@ -93,7 +98,7 @@ at `setup()` time for exactly this reason (see [Transforms](transforms.md#maxexp
 
 ## The `Registry<T>` interface
 
-Every one of the seven fields above is built by the same `createRegistry`
+Every one of the eight registry fields above is built by the same `createRegistry`
 (`packages/core/src/internal/registry.ts`):
 
 ```ts
@@ -121,7 +126,9 @@ export interface Registry<T> {
   in this repository.
 - **`get`**/**`has`**/**`list`** are straightforward lookups; `list()` returns names sorted
   alphabetically, which is what every "Registered kinds: …" / "Registered transforms: …" error
-  message iterates over (`packages/core/src/internal/prepare.ts`).
+  message iterates over (`packages/core/src/internal/prepare.ts`). `list()` is alphabetical for
+  `policies` too; the order policies are _evaluated_ in is registration order, which core reads
+  from the registry's internal `Map`, not from `list()`.
 
 Entries live in a `Map`, not a plain object, specifically so a capability legitimately named
 `constructor` or `__proto__` behaves as an ordinary key rather than colliding with
@@ -162,6 +169,112 @@ A few properties worth knowing before relying on install order:
   once before any plugin has finished installing does not run `setup()` twice or interleave two
   drains — both calls await the same in-progress pass, and a plugin queued via a `.use()` that
   lands mid-drain is picked up by that same pass rather than starting a second one.
+
+## Execution policies
+
+An `ExecutionPolicy` (`packages/core/src/types/policy.ts`) approves or rejects one execution after
+its query is compiled and before its data source runs (SPEC.md §110):
+
+```ts
+import { definePlugin, type ExecutionPolicy } from "@qspecs/core";
+
+const onlyKnownSources: ExecutionPolicy = {
+  check({ query }) {
+    if (query === undefined || query.source === "analytics") return { outcome: "allow" };
+    return {
+      outcome: "deny",
+      issues: [{ code: "source", message: "Unknown source.", path: ["spec", "query", "source"] }],
+    };
+  },
+};
+
+export const governance = definePlugin({
+  name: "my-governance",
+  setup(api) {
+    api.policies.register("only-known-sources", onlyKnownSources);
+  },
+});
+```
+
+**What a policy sees.** One frozen `ExecutionPolicyInput` per execution: the `executionId`, the
+resource's `kind` and `name`, the prepared (deep-frozen) manifest, the frozen, null-prototype copy
+of `ExecutionContext.metadata`, the caller's `signal`, and, when the resource declares `spec.query`,
+its `language`, `source`, each binding resolved to what it reads (`{ kind: "parameter", parameter }`
+or `{ kind: "literal" }`, never a value) and `view`: the query language's `policyView(compiled)`,
+deep-frozen. A policy never sees a caller-supplied value: no parameter value, and nothing resolved
+from one. What the manifest itself declares, binding literals and parameter defaults included, is
+readable through `manifest`. `view` is `unknown` to core; narrow it with the
+language package's guard (`isSqlPolicyView` from `@qspecs/sql`) and deny anything else. A language
+that defines no `policyView` hands policies `view: undefined`.
+
+**When it runs.** On every `execute()`, after `query:compile:end` and before the data source, so
+the view a policy approves is derived from the very object the source receives. A resource without
+`spec.query` runs its policies right after parameter validation, with `query: undefined`.
+`prepare()` never runs policies: a policy decision depends on the host's configuration at that
+moment and on the execution's metadata, neither of which a long-lived prepared plan can know. Core
+caches no verdict; a policy caches what it can prove is pure (a parse tree keyed by the statement
+text, for instance). Policy time is not covered by `limits.queryTimeoutMs`, which scopes the source
+call only. Policies receive the caller's signal and should honor it, but core does not depend on
+that: when the signal aborts while a `check` is pending, core stops waiting at once, rejects with
+`QSpecAbortError`, and ignores whatever the check later returns or throws.
+
+**Parameters are validated before policies run.** Stage 3 (parameter validation) runs before the
+policy step, for queries and query-less resources alike. A caller whose parameters are invalid
+therefore gets `ParameterValidationError` (a 400 over `@qspecs/http`, whose issues can name a
+parameter's declared constraints, such as an enum's allowed values) without any policy being
+consulted and without a `policy:decision` event. A policy decides whether an execution of
+validated parameters may run; it is not the place to decide whether a caller may use a resource
+at all. That resource-level authorization belongs in front of QSpec (around
+`createQSpecHandler`, or before `execute()`), or in a future pre-validation phase the policy design
+reserves; see `docs/known-gaps.md`.
+
+**Plugin setup is settled first.** Every `PreparedResource.execute()` awaits the runtime's
+`ready()` before it reads the policy list, so a policy plugin queued after `prepare()` still
+guards a resource prepared earlier (`@qspecs/http` keeps one per resource for the handler's
+lifetime), and a plugin whose `setup()` failed (a policy whose parser did not load, say) stops
+every later execution with that setup error, before any source runs.
+
+**Order.** Policies run one after another in registration order, which is `.use()` order across
+plugins. The first denial stops evaluation: later policies do not run. `replace(name, policy)` on a
+registered name keeps that policy's position; on a new name it appends. With no policy registered,
+nothing about an execution changes, and `policyView` is never called.
+
+**Fail closed.** Anything but a well-formed decision denies or fails, never allows:
+
+| What the policy does                                                               | Result                                                                    |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| returns `{ outcome: "allow" }`                                                     | the next policy, then the source                                          |
+| returns `{ outcome: "deny", issues }`                                              | `ExecutionDeniedError` (`QSPEC_EXECUTION_DENIED`) with those issues       |
+| returns `{ outcome: "deny", issues: [] }`                                          | `ExecutionDeniedError` with one core issue, code `QSPEC_EXECUTION_DENIED` |
+| throws `ExecutionDeniedError`                                                      | rebuilt with the **registered** policy name                               |
+| anything, while the caller's signal is aborted (or never settles before it aborts) | `QSpecAbortError`                                                         |
+| throws `AbortError`, `TimeoutError` or `QSpecAbortError` while the signal is live  | `ExecutionPolicyError`: the policy's own failure, not a client abort      |
+| throws anything else, including another `QSpecError`                               | `ExecutionPolicyError` (`QSPEC_POLICY_FAILED`), the throw as `cause`      |
+| returns anything else (`undefined`, an unknown outcome, a malformed issue)         | `ExecutionPolicyError`                                                    |
+
+Issue `code`s are the policy's own (stable rule IDs) and issue paths are **absolute** manifest
+paths, not rebased the way `validate` hooks' are: a policy sees the whole manifest and may point
+anywhere. Core rebuilds every issue rather than copying it: it reads `code`, `message`, `path` and
+`suggestion` once each, keeps nothing else, and requires every path segment to be a string or a
+finite number; anything else fails closed as `ExecutionPolicyError`. The reported issues are
+frozen. The error's message names the policy and the issue count only, never an issue message.
+A policy that tries to write to its input, its view or its metadata throws (they are frozen) and
+so fails closed.
+
+**Audit.** Each policy evaluated emits one `policy:decision` event carrying `executionId`,
+`resource`, `policy`, `outcome` (`"allow"`, `"deny"` or `"error"`), `codes` and `durationMs`: issue
+codes for a denial, the error's code for a failure, nothing else. A failed execution still ends with
+`execution:error`, whose `code` is `QSPEC_EXECUTION_DENIED` or `QSPEC_POLICY_FAILED`. Hooks stay
+observers: a host that must refuse to run when its audit write fails writes the record from a
+policy, which may be asynchronous and may deny.
+
+**What a policy must never log.** Core never logs metadata or puts it (or its keys) in an event,
+an error or `ExecutionMetadata`, and a policy must not either: metadata values are the host's own
+references (a transaction, a viewer) and its issue messages must not echo them. The same applies
+to anything a policy derives from the manifest's statement that should stay on the server: the
+issues are on the thrown error for the host that catches it, and `@qspecs/http` keeps them off the
+wire (403, no issues). `@qspecs/testing`'s `runExecutionPolicyContractTests` is the acceptance bar;
+see [Plugin Authoring](plugin-authoring.md#writing-an-execution-policy).
 
 ## What ships as a plugin today
 

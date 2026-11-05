@@ -2,6 +2,7 @@ import type { QSpecIssue } from "../errors.js";
 import type { JsonValue } from "../json.js";
 import type { Dataset, Field, FieldType, RawQueryResult } from "./dataset.js";
 import type { HookRegistry, QSpecLogger } from "./events.js";
+import type { ExecutionPolicy } from "./policy.js";
 import type { PresentationDefinition, PresentationType } from "./presentation.js";
 import type { QueryDefinition } from "./query.js";
 import type { QSpecResourceSpec } from "./manifest.js";
@@ -14,6 +15,12 @@ export interface DataSourceContext {
   readonly locale?: string | undefined;
   readonly timezone?: string | undefined;
   readonly logger: QSpecLogger;
+  /**
+   * `ExecutionContext.metadata`, shallow-copied into a null-prototype object and frozen once per
+   * execution; the same object the policies saw. Values are the host's own references. Never log it. (SPEC.md §59, §72.6)
+   * Absent when the caller passed no metadata.
+   */
+  readonly metadata?: Readonly<Record<string, unknown>> | undefined;
 }
 
 /** Connectivity and native execution only; never decides presentation. (SPEC.md §62) */
@@ -53,6 +60,14 @@ export interface QueryLanguage<TStatement = unknown, TCompiledQuery = unknown> {
    * one. Issue paths are relative to `spec.query`. (SPEC.md §81)
    */
   validate?(query: QueryDefinition<TStatement>): void | readonly QSpecIssue[];
+  /**
+   * A value-free description of a compiled query for execution policies. Must not contain any
+   * bound value and must not share mutable structure with `compiled`; core deep-freezes the
+   * result before the first policy sees it. Called only when at least one policy is registered.
+   * Optional: without it, policies receive `view: undefined`, and a fail-closed policy then
+   * denies every execution in this language. (SPEC.md §72.6, §110)
+   */
+  policyView?(compiled: TCompiledQuery): unknown;
 }
 
 export interface TransformContext {
@@ -114,7 +129,8 @@ export interface Renderer<TPresentation = PresentationDefinition, TOutput = unkn
  * The capability surface handed to every plugin. (SPEC.md §50)
  *
  * `hooks` deliberately exposes only `on`: plugins observe lifecycle events,
- * they never emit them. (SPEC.md §68)
+ * they never emit them. (SPEC.md §68) A plugin that must be able to stop an
+ * execution registers an execution policy instead.
  */
 export interface QSpecPluginAPI {
   readonly queryLanguages: Registry<QueryLanguage>;
@@ -124,6 +140,11 @@ export interface QSpecPluginAPI {
   readonly resources: Registry<ResourceKind>;
   readonly presentations: Registry<PresentationType>;
   readonly renderers: Registry<Renderer>;
+  /**
+   * Execution policies, evaluated in registration order between compile and the data source;
+   * the first denial wins. `replace()` on a registered name keeps its position. (SPEC.md §110)
+   */
+  readonly policies: Registry<ExecutionPolicy>;
   readonly hooks: { readonly on: HookRegistry["on"] };
   readonly logger: QSpecLogger;
   readonly limits: Readonly<QSpecLimits>;

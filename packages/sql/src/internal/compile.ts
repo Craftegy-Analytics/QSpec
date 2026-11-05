@@ -50,6 +50,20 @@ function statementText(statement: unknown): statement is SqlStatement {
 }
 
 /**
+ * The statement as SQL text, or the compile-time error every caller reports for anything else.
+ * Shared by `compileSql` and `sqlPolicyView`, so the two reject a structured statement with the
+ * same message.
+ */
+export function requireSqlStatement(query: QueryDefinition): SqlStatement {
+  if (!statementText(query.statement)) {
+    throw new QueryCompilationError(
+      `SQL statement must be a string, received ${typeof query.statement}.`,
+    );
+  }
+  return query.statement;
+}
+
+/**
  * Scans the statement and resolves each `:name` against `context.bindings`,
  * mapping names to values via `Object.hasOwn` — never a bare bracket access,
  * so a statement referencing `:constructor` cannot pick up
@@ -63,13 +77,7 @@ function statementText(statement: unknown): statement is SqlStatement {
  * this file's own tests do.
  */
 export function compileSql(query: QueryDefinition, context: QueryCompileContext): CompiledSqlQuery {
-  if (!statementText(query.statement)) {
-    throw new QueryCompilationError(
-      `SQL statement must be a string, received ${typeof query.statement}.`,
-    );
-  }
-
-  const { segments, parameterNames } = scanSql(query.statement);
+  const { segments, parameterNames } = scanSql(requireSqlStatement(query));
 
   const values: JsonValue[] = [];
   for (const name of parameterNames) {

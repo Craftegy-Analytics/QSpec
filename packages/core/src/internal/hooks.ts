@@ -34,6 +34,7 @@ export function createHooks(onHandlerError?: (error: unknown) => void): HookRegi
     "dataset:normalize:duplicate-column": new Set(),
     "transform:start": new Set(),
     "transform:end": new Set(),
+    "policy:decision": new Set(),
     "execution:complete": new Set(),
     "execution:error": new Set(),
   };

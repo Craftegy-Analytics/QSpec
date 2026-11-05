@@ -52,6 +52,12 @@ const DOLLAR_TAG = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
  * database rejects a malformed statement with a far better message than a
  * scanner can, and guessing where the author meant a quote to close would be
  * worse than passing the text through.
+ *
+ * Public (exported from `@qspecs/sql`'s entry point) because a second consumer
+ * needed exactly this logic: editor tooling and execution-policy admission
+ * checks must find the same parameters `compileSql` finds, and a copy built on
+ * regular-expression masking misses escape strings, dollar quotes and nested
+ * comments. SPEC.md §104: promote a shared abstraction, do not copy it.
  */
 export function scanSql(statement: string): ScanResult {
   const segments: string[] = [];

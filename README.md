@@ -241,6 +241,16 @@ before the in-memory source is ever queried, with a "did you mean" diagnostic. T
 `prepare()`'s static validation (SPEC.md §81) working before any data is fetched; see
 [`docs/architecture.md`](docs/architecture.md) for exactly which stages run when.
 
+**Execution policies** (SPEC.md §110): a plugin can approve or reject every execution after its
+query is compiled and before its data source runs, through `api.policies`, seeing a value-free view
+of the compiled query and never a caller-supplied value; a denial is `ExecutionDeniedError`, and the
+data source is never called. `ExecutionContext.metadata` (a transaction, a tenant, a viewer) reaches
+policies and `DataSourceContext.metadata` as one frozen copy. Parameters are validated before
+policies run, so authorize callers in front of QSpec. See
+[`docs/plugins.md`](docs/plugins.md#execution-policies) and
+[`test/policy-pipeline.test.ts`](test/policy-pipeline.test.ts), which proves against a real
+PostgreSQL that a denied statement never reaches the server.
+
 ## Packages
 
 | Package              | Runtime dependencies             | Peer dependencies                                     | Environment              | Status  |
@@ -335,8 +345,12 @@ node packages/cli/dist/bin.js validate fixtures/valid/*.qspec.json
 - [`docs/superpowers/specs/2026-08-09-qspec-design.md`](docs/superpowers/specs/2026-08-09-qspec-design.md) —
   the implementation design document, recording every ambiguity SPEC.md leaves open and how
   this codebase resolves it.
+- [`docs/superpowers/specs/2026-11-01-qspec-execution-policy-design.md`](docs/superpowers/specs/2026-11-01-qspec-execution-policy-design.md):
+  the execution policy and metadata forwarding design (SPEC.md §110, QSpec issue #1).
 - [`docs/known-gaps.md`](docs/known-gaps.md) — deferred items and accepted limitations, judged
   deliberately and written down so a later phase does not rediscover them.
+- [`CHANGELOG.md`](CHANGELOG.md): what changed in each lockstep release, including behaviour
+  changes.
 
 ### Topic guides (SPEC.md §92, plus Public API from §104)
 
@@ -365,9 +379,9 @@ The manifest pipeline, in execution order:
 Extending and operating QSpec:
 
 - [`docs/plugins.md`](docs/plugins.md) — the plugin contract every non-core capability is
-  registered through.
+  registered through, including how execution policies are evaluated.
 - [`docs/plugin-authoring.md`](docs/plugin-authoring.md) — a worked walkthrough of writing a
-  transform and a data source from scratch.
+  transform and a data source from scratch, and the rules for writing an execution policy.
 - [`docs/react-integration.md`](docs/react-integration.md) — the Suspense-first React binding
   over a `QSpecExecutor`.
 - [`docs/cli.md`](docs/cli.md) — the `qspec` binary's `validate` and `inspect` commands.

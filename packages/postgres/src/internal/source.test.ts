@@ -318,6 +318,7 @@ function stubApi(): QSpecPluginAPI {
     resources: stubRegistry(),
     presentations: stubRegistry(),
     renderers: stubRegistry(),
+    policies: stubRegistry(),
     hooks: { on: () => () => undefined },
     logger: {},
     limits: DEFAULT_LIMITS,

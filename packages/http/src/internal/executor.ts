@@ -173,12 +173,15 @@ function asExecuteResponse(value: unknown): QSpecExecuteResponse {
  *   fallback; none of those can be reconstructed as their original class
  *   without data the wire never sent, so every 5xx collapses to the one
  *   class the task brief specifies.
- * - Everything else (404 `QSPEC_RESOURCE_NOT_FOUND`, 405
- *   `QSPEC_METHOD_NOT_ALLOWED`, and any other 4xx such as
- *   `QSPEC_BAD_REQUEST`): the base `QSpecError`, carrying the server's own
- *   code and message. There is no more specific core class for these — they
- *   are concerns of the HTTP boundary itself (Task 2's handler), not of
- *   anything core's local `execute()` can throw.
+ * - Everything else (403 `QSPEC_EXECUTION_DENIED`, 404
+ *   `QSPEC_RESOURCE_NOT_FOUND`, 405 `QSPEC_METHOD_NOT_ALLOWED`, and any other
+ *   4xx such as `QSPEC_BAD_REQUEST`): the base `QSpecError`, carrying the
+ *   server's own code and message. There is no more specific core class for
+ *   these: they are concerns of the HTTP boundary itself (Task 2's handler),
+ *   not of anything core's local `execute()` can throw. A 403 denial is the
+ *   one exception to "nothing core can throw": core does throw
+ *   `ExecutionDeniedError`, but the handler deliberately sends it without
+ *   the policy's issues, so there is nothing to rebuild that class from.
  */
 function reconstructError(status: number, body: QSpecErrorBody): QSpecError {
   if (body.code === "QSPEC_MANIFEST_INVALID") {

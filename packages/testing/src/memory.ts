@@ -75,6 +75,9 @@ export function memory(options: MemoryOptions): MemoryPlugin {
       statement: query.statement,
       bindings: context.bindings,
     }),
+    // What an execution policy may see: the compiled query without `bindings`, which hold the
+    // bound values. `statement` is the manifest's own (already frozen) declaration.
+    policyView: (compiled) => ({ source: compiled.source, statement: compiled.statement }),
   };
 
   const createSource = (sourceName: string): DataSource<CompiledMemoryQuery> => ({

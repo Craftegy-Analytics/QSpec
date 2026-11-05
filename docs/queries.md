@@ -71,8 +71,13 @@ The pattern a string binding must match, verbatim from
 [`packages/core/src/internal/bindings.ts`](../packages/core/src/internal/bindings.ts):
 
 ```ts
-export const PARAMETER_REFERENCE = /^\$parameters\.([A-Za-z_][A-Za-z0-9_]*)$/;
+const PARAMETER_REFERENCE = /^\$parameters\.([A-Za-z_][A-Za-z0-9_]*)$/;
 ```
+
+It is defined once. Every reader of a binding classifies it through `describeBinding` (exported
+from `@qspecs/core`), which applies this pattern to the string form and the exactly-one-key rule
+below to the object forms: `prepare()`'s `compileBindings`, `qspec validate`'s structural
+validator, and the bindings an execution policy receives all agree on what a binding is.
 
 If a string binding doesn't match this pattern, it is **not** treated as a literal string value —
 it is a manifest validation error, in full:
@@ -146,6 +151,49 @@ in [`docs/architecture.md` §9.1](architecture.md#91-why-compiledsqlquery-has-no
 document does not repeat it. A non-SQL query language plugin is free to compile `statement` plus
 `bindings` into whatever shape its data source needs (SPEC.md §35's generic
 `QueryDefinition<TStatement>`).
+
+## What an execution policy sees of a query
+
+An execution policy (see [Plugins](plugins.md#execution-policies)) runs after the query is compiled
+and before the data source, and must never see a caller-supplied value. Core does not know where a
+language keeps its values, so the language supplies the value-free part itself:
+
+```ts
+interface QueryLanguage<TStatement = unknown, TCompiledQuery = unknown> {
+  // compile and validate, as above
+  policyView?(compiled: TCompiledQuery): unknown;
+}
+```
+
+`policyView` must return a description of the compiled query that contains no bound value and
+shares no mutable structure with `compiled`; core deep-freezes it before the first policy sees it,
+and calls it only when at least one policy is registered. It is optional: without it, policies
+receive `view: undefined`, and a policy that fails closed then denies every execution in that
+language. Alongside the view, a policy receives `bindings` already resolved to what each one reads,
+`{ kind: "parameter", parameter }` or `{ kind: "literal" }`, never the literal's value; a policy's
+admission check, run outside a runtime, gets the same description from `describeBinding`.
+
+`@qspecs/sql` implements it, and exports the pieces a policy written against SQL needs:
+
+```ts
+import { isSqlPolicyView, scanSql, sqlPolicyView, type SqlPolicyView } from "@qspecs/sql";
+```
+
+- **`SqlPolicyView`** is `CompiledSqlQuery` without `values`: `{ segments, parameterNames,
+source }`, with both arrays copied.
+- **`isSqlPolicyView(value)`** narrows `PolicyQuery.view` (typed `unknown`) and accepts exactly
+  those three keys, string arrays, and `segments.length === parameterNames.length + 1`; a stray
+  `values` key, or anything else, is rejected rather than ignored.
+- **`sqlPolicyView(definition)`** computes the same view statically from `spec.query`, for an
+  admission check a host runs when it stores a manifest. It equals
+  `policyView(compileSql(definition, context))` for every set of bindings, because both come from
+  one `scanSql` call on the same statement; a fixed-seed property test over the scanner's
+  adversarial fragments pins it.
+- **`scanSql(statement)`** is the scanner itself (`ScanResult`: `segments`, `parameterNames`,
+  `positionalPlaceholder`), public so tooling that needs the statement's parameters (an editor's
+  highlighting, a policy's admission check) uses the same five skipped contexts
+  ([`docs/architecture.md` §9.2](architecture.md#92-the-scanners-five-skipped-contexts)) instead of
+  a regular expression that misses escape strings, dollar quotes and nested comments.
 
 ## Examples
 

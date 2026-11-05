@@ -176,6 +176,26 @@ describe("validateManifestStructure", () => {
     expect(issues[0]?.message).toMatch(/\$parameters\./);
   });
 
+  it("rejects a near-miss reference prefix, by the same rule compileBindings applies", () => {
+    // "$parameter.from" (singular) must not read as a reference here while
+    // prepare() rejects it, or `qspec validate` and prepare() would disagree.
+    const manifest = {
+      ...valid,
+      spec: {
+        parameters: { from: { type: "string" } },
+        query: {
+          source: "s",
+          language: "sql",
+          statement: "x",
+          bindings: { a: "$parameter.from" },
+        },
+      },
+    };
+    const issues = validateManifestStructure(manifest);
+    expect(issues).toHaveLength(1);
+    expect(formatPath(issues[0]?.path ?? [])).toBe("spec.query.bindings.a");
+  });
+
   it("accepts all three binding forms", () => {
     const manifest = {
       ...valid,

@@ -5,6 +5,7 @@ import {
   QSpecAbortError,
   type DataSource,
   type DataSourceContext,
+  type ExecutionPolicy,
   type QSpecManifest,
   type QSpecResourceSpec,
   type QueryLanguage,
@@ -446,5 +447,102 @@ describe("createQSpecHandler", () => {
     const response = await handler(post({ resource: "toString" }));
     expect(response.status).toBe(404);
     expect(expectError(await readBody(response)).code).toBe("QSPEC_RESOURCE_NOT_FOUND");
+  });
+});
+
+describe("createQSpecHandler: execution policies", () => {
+  /** `buildRuntime()`'s memory source plus one policy, registered by a plugin. */
+  function guardedRuntime(policy: ExecutionPolicy) {
+    const { plugin, runtime } = buildRuntime();
+    runtime.use(
+      definePlugin({
+        name: "test/guard",
+        setup(api) {
+          api.policies.register("guard", policy);
+        },
+      }),
+    );
+    return { plugin, runtime };
+  }
+
+  it("answers a denial with 403, a fixed message, and no issues", async () => {
+    const { plugin, runtime } = guardedRuntime({
+      check: () => ({
+        outcome: "deny",
+        issues: [
+          {
+            code: "shape.relation",
+            message: "Relation secret_payroll_ledger is not readable.",
+            path: ["spec", "query", "statement"],
+          },
+        ],
+      }),
+    });
+    const handler = createQSpecHandler({ runtime, manifests: { orders: ORDERS_MANIFEST } });
+
+    const response = await handler(post({ resource: "orders" }));
+    expect(response.status).toBe(403);
+    const rawText = await response.clone().text();
+    expect(rawText).not.toContain("secret_payroll_ledger");
+    expect(rawText).not.toContain("shape.relation");
+    const error = expectError(await readBody(response));
+    expect(Object.keys(error).sort()).toEqual(["code", "message"]);
+    expect(error).toEqual({
+      code: "QSPEC_EXECUTION_DENIED",
+      message: "The request was refused by an execution policy.",
+    });
+    expect(plugin.calls).toHaveLength(0);
+  });
+
+  it("answers a failing policy with the generic 500 and its code", async () => {
+    const { plugin, runtime } = guardedRuntime({
+      check: () => {
+        throw new Error("policy exploded near secret_payroll_ledger");
+      },
+    });
+    const handler = createQSpecHandler({ runtime, manifests: { orders: ORDERS_MANIFEST } });
+
+    const response = await handler(post({ resource: "orders" }));
+    expect(response.status).toBe(500);
+    expect(await response.clone().text()).not.toContain("secret_payroll_ledger");
+    expect(expectError(await readBody(response))).toEqual({
+      code: "QSPEC_POLICY_FAILED",
+      message: "The request could not be completed because of an internal error.",
+    });
+    expect(plugin.calls).toHaveLength(0);
+  });
+
+  it("stops a cached prepared resource once a later policy plugin's setup fails", async () => {
+    // The handler caches the PreparedResource for its lifetime. A policy plugin queued after
+    // that (and failing its setup, for example on a parser load) must still stop execution.
+    const { plugin, runtime } = buildRuntime();
+    const handler = createQSpecHandler({ runtime, manifests: { orders: ORDERS_MANIFEST } });
+    expect((await handler(post({ resource: "orders" }))).status).toBe(200);
+    expect(plugin.calls).toHaveLength(1);
+
+    runtime.use(
+      definePlugin({
+        name: "test/broken-guard",
+        setup() {
+          throw new Error("could not load the parser");
+        },
+      }),
+    );
+    const response = await handler(post({ resource: "orders" }));
+    expect(response.status).toBe(500);
+    expect(await response.clone().text()).not.toContain("could not load the parser");
+    expect(expectError(await readBody(response)).code).toBe("QSPEC_PLUGIN_REGISTRATION_FAILED");
+    expect(plugin.calls).toHaveLength(1);
+  });
+
+  it("answers an allowed request exactly as a runtime without policies does", async () => {
+    const { runtime } = guardedRuntime({ check: () => ({ outcome: "allow" }) });
+    const handler = createQSpecHandler({ runtime, manifests: { orders: ORDERS_MANIFEST } });
+
+    const response = await handler(post({ resource: "orders" }));
+    expect(response.status).toBe(200);
+    const body = await readBody(response);
+    if (!body.ok) throw new Error(`expected ok:true, got error ${body.error.code}`);
+    expect(body.result.data.rows).toEqual([{ month: "2026-01-01", revenue: 10 }]);
   });
 });

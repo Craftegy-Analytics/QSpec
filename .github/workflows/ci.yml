@@ -38,14 +38,15 @@ jobs:
       - name: Verify the PostgreSQL integration and end-to-end suites actually ran
         # GitHub-hosted ubuntu-latest runners ship Docker already running, which is all
         # testcontainers needs (packages/postgres/test/integration.test.ts,
-        # test/postgres-pipeline.test.ts, and test/react-pipeline.test.tsx each start their own
-        # postgres:16-alpine container; no `services:` block is needed alongside that). The third
+        # test/postgres-pipeline.test.ts, test/react-pipeline.test.tsx, and
+        # test/policy-pipeline.test.ts each start their own postgres:16-alpine container; no
+        # `services:` block is needed alongside that). The third
         # of those, test/react-pipeline.test.tsx, ALSO needs jsdom — declared per-file via a
         # `// @vitest-environment jsdom` docblock rather than a vitest.config.ts setting — which
         # is a second, independent way for it to end up silently not covering what it claims: a
         # dropped docblock wouldn't skip the file, it would just make every React render inside
         # it throw for lack of a DOM, which the checks below catch the same way they catch a
-        # dropped container (a non-zero `failing` count for that file). All three suites detect a
+        # dropped container (a non-zero `failing` count for that file). All four suites detect a
         # missing container runtime and skip themselves rather than failing outright — the right
         # behavior for a contributor's machine without Docker, but the wrong one here: a CI skip
         # and a CI pass look identical in the vitest summary.
@@ -108,6 +109,10 @@ jobs:
             echo "::error::test/react-pipeline.test.tsx did not report as having run — file missing, renamed, dropped from the vitest glob (note: it is a .tsx file matched by the test/**/*.test.tsx glob entry, not test/**/*.test.ts), or its describe name changed?" >&2
             exit 1
           fi
+          if ! grep -qF "execution policies against a real PostgreSQL (testcontainers)" "$LOG"; then
+            echo "::error::test/policy-pipeline.test.ts did not report as having run. Is the file missing, renamed, dropped from the vitest glob, or its describe name changed?" >&2
+            exit 1
+          fi
 
           check_file() {
             local suffix="$1"
@@ -139,6 +144,7 @@ jobs:
           check_file "packages/postgres/test/integration.test.ts"
           check_file "test/postgres-pipeline.test.ts"
           check_file "test/react-pipeline.test.tsx"
+          check_file "test/policy-pipeline.test.ts"
       - name: Verify each package packs cleanly
         run: |
           set -euo pipefail
