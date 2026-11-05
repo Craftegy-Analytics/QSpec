@@ -1,6 +1,6 @@
 {
   "name": "@qspecs/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Command-line tooling for QSpec manifests",
   "type": "module",
   "license": "MIT",
@@ -34,13 +34,13 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@qspecs/core": "0.1.0",
-    "@qspecs/schema": "0.1.0"
+    "@qspecs/core": "0.2.0",
+    "@qspecs/schema": "0.2.0"
   },
   "devDependencies": {
-    "@qspecs/charts": "0.1.0",
-    "@qspecs/sql": "0.1.0",
-    "@qspecs/transforms": "0.1.0"
+    "@qspecs/charts": "0.2.0",
+    "@qspecs/sql": "0.2.0",
+    "@qspecs/transforms": "0.2.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json"

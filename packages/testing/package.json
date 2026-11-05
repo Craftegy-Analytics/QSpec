@@ -1,6 +1,6 @@
 {
   "name": "@qspecs/testing",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Internal test support for the QSpec monorepo. Never published.",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
     "./package.json": "./package.json"
   },
   "peerDependencies": {
-    "@qspecs/core": "0.1.0",
+    "@qspecs/core": "0.2.0",
     "vitest": "^3.0.0"
   },
   "scripts": {

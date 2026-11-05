@@ -3,7 +3,7 @@
 Every package is released in lockstep (see [`RELEASING.md`](RELEASING.md)), so one entry covers all
 of them.
 
-## Unreleased (planned as 0.2.0)
+## 0.2.0 (2026-11-05)
 
 Execution policies and metadata forwarding (QSpec issue #1; design:
 [`docs/superpowers/specs/2026-11-01-qspec-execution-policy-design.md`](docs/superpowers/specs/2026-11-01-qspec-execution-policy-design.md)).

@@ -1,6 +1,6 @@
 {
   "name": "@qspecs/http",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The wire protocol for carrying QSpec execution across an HTTP boundary",
   "type": "module",
   "license": "MIT",
@@ -31,11 +31,11 @@
     "./package.json": "./package.json"
   },
   "peerDependencies": {
-    "@qspecs/core": "0.1.0"
+    "@qspecs/core": "0.2.0"
   },
   "devDependencies": {
-    "@qspecs/core": "0.1.0",
-    "@qspecs/testing": "0.1.0"
+    "@qspecs/core": "0.2.0",
+    "@qspecs/testing": "0.2.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json"

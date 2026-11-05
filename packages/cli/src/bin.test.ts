@@ -37,7 +37,7 @@ describe("main", () => {
     const code = await main(["--version"], io);
 
     expect(code).toBe(0);
-    expect(text()).toBe("0.1.0");
+    expect(text()).toBe("0.2.0");
   });
 
   it("prints help and exits 0 for --help", async () => {

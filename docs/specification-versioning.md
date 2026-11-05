@@ -56,9 +56,9 @@ issue.
 
 `apiVersion` names a **specification** version — the shape and semantics a manifest document
 promises to follow — never an npm package version. This repository's own packages currently make
-that distinction easy to lose sight of, because every workspace package is at `0.1.0`
+that distinction easy to lose sight of, because every workspace package is at `0.2.0`
 simultaneously and every non-`@qspecs/core` package's `peerDependencies` entry pins an **exact**
-version rather than a semver range — `"@qspecs/core": "0.1.0"`, not `"^0.1.0"` or `"^1.0.0"`. That
+version rather than a semver range — `"@qspecs/core": "0.2.0"`, not `"^0.2.0"` or `"^1.0.0"`. That
 is consistent with 0.x semver conventions, where any release may be breaking and a caret range
 would promise more compatibility than pre-1.0 development can back up; it is also narrower than
 SPEC.md §79's own example (a caret range against a 1.x baseline), which describes the intended

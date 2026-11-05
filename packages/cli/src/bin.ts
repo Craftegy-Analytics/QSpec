@@ -77,7 +77,7 @@ export async function main(
   const io: CliIo = { ...baseIo, json: values.json === true };
 
   if (values.version === true) {
-    io.out("0.1.0");
+    io.out("0.2.0");
     return 0;
   }
 
